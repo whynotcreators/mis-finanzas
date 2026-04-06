@@ -356,6 +356,7 @@ const Icons={
   historial:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/><circle cx="22" cy="12" r="0"/></svg>,
   eye:<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
   eyeOff:<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
+  calendarPlus:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4"/></svg>,
 };
 
 // ── SHARED UI ────────────────────────────────────────────────────────────
@@ -2337,6 +2338,343 @@ function Analytics(){
 // ══════════════════════════════════════════════════════════════════════════
 // APP SHELL + SIDEBAR
 // ══════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
+// CALENDARIO
+// ══════════════════════════════════════════════════════════════════════════
+const EVENT_TYPES={
+  reunion:{label:'Reunión',color:'#8470FF',bg:'#ECE9FF'},
+  tarea:{label:'Tarea',color:'#297B32',bg:'#E5FAE6'},
+  recordatorio:{label:'Recordatorio',color:'#F9970C',bg:'#FEF4E1'},
+};
+
+function EventModal({event,selectedDate,onClose,onSave}){
+  const today=selectedDate||localToday();
+  const [form,setForm]=useState(event||{title:'',type:'reunion',date:today,time:'',description:'',done:false});
+  const [saving,setSaving]=useState(false);
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const submit=async()=>{
+    if(!form.title.trim()||!form.date)return;
+    setSaving(true);
+    const p={title:form.title.trim(),type:form.type,date:form.date,time:form.time||null,description:form.description||null,done:form.done};
+    if(event?.id){await sb.from('calendar_events').update(p).eq('id',event.id);}
+    else{await sb.from('calendar_events').insert(p);}
+    setSaving(false);onSave();
+  };
+  return(
+    <Modal onClose={onClose} title={event?'Editar evento':'Nuevo evento'} maxWidth={420}>
+      <div style={{display:'flex',flexDirection:'column',gap:12}}>
+        <Field label="Título"><Input value={form.title} onChange={e=>set('title',e.target.value)} placeholder="Ej: Reunión con cliente" autoFocus/></Field>
+        <Field label="Tipo">
+          <div style={{display:'flex',gap:6}}>
+            {Object.entries(EVENT_TYPES).map(([k,v])=>(
+              <button key={k} onClick={()=>set('type',k)} style={{flex:1,padding:'7px 0',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${form.type===k?v.color:'var(--border)'}`,background:form.type===k?v.bg:'var(--surface)',color:form.type===k?v.color:'var(--text3)',transition:'all .15s'}}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <Field label="Fecha"><Input type="date" value={form.date} onChange={e=>set('date',e.target.value)}/></Field>
+          <Field label="Hora (opcional)"><Input type="time" value={form.time||''} onChange={e=>set('time',e.target.value)}/></Field>
+        </div>
+        <Field label="Descripción (opcional)"><Input value={form.description||''} onChange={e=>set('description',e.target.value)} placeholder="Notas adicionales..."/></Field>
+        {event&&<label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer',color:'var(--text2)'}}>
+          <input type="checkbox" checked={form.done} onChange={e=>set('done',e.target.checked)}/> Completado
+        </label>}
+      </div>
+      <ModalFooter onClose={onClose} onSave={submit} saving={saving} saveLabel={event?'Guardar':'Crear'}/>
+    </Modal>
+  );
+}
+
+function Calendario(){
+  const [events,setEvents]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [modal,setModal]=useState(null); // null | 'new' | event object
+  const [selectedDate,setSelectedDate]=useState(localToday());
+  const [viewMonth,setViewMonth]=useState(()=>{
+    const d=new Date();
+    return{year:d.getFullYear(),month:d.getMonth()};
+  });
+  const [filterType,setFilterType]=useState('all');
+
+  const load=async()=>{
+    const {data}=await sb.from('calendar_events').select('*').order('date').order('time');
+    setEvents(data||[]);setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const del=async id=>{
+    if(!window.confirm('¿Eliminar este evento?'))return;
+    await sb.from('calendar_events').delete().eq('id',id);
+    load();
+  };
+
+  const toggleDone=async(ev)=>{
+    await sb.from('calendar_events').update({done:!ev.done}).eq('id',ev.id);
+    load();
+  };
+
+  // Días del mes
+  const {year,month}=viewMonth;
+  const firstDay=new Date(year,month,1).getDay(); // 0=Dom
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const today=localToday();
+  const monthKey=`${year}-${String(month+1).padStart(2,'0')}`;
+
+  // Eventos del mes visible
+  const monthEvents=events.filter(e=>e.date?.startsWith(monthKey));
+
+  // Eventos del día seleccionado
+  const dayEvents=events.filter(e=>e.date===selectedDate&&(filterType==='all'||e.type===filterType))
+    .sort((a,b)=>(a.time||'99:99').localeCompare(b.time||'99:99'));
+
+  // Próximos eventos (hoy en adelante)
+  const upcoming=events.filter(e=>e.date>=today&&!e.done)
+    .sort((a,b)=>a.date.localeCompare(b.date)||(a.time||'').localeCompare(b.time||''))
+    .slice(0,5);
+
+  const prevMonth=()=>setViewMonth(({year,month})=>month===0?{year:year-1,month:11}:{year,month:month-1});
+  const nextMonth=()=>setViewMonth(({year,month})=>month===11?{year:year+1,month:0}:{year,month:month+1});
+
+  const monthLabel=new Date(year,month,1).toLocaleString('es',{month:'long',year:'numeric'});
+  const DAYS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+
+  // Contar eventos por día
+  const eventsByDay={};
+  monthEvents.forEach(e=>{
+    const d=parseInt(e.date.split('-')[2]);
+    if(!eventsByDay[d])eventsByDay[d]=[];
+    eventsByDay[d].push(e);
+  });
+
+  // Stats
+  const totalPending=events.filter(e=>!e.done&&e.date>=today).length;
+  const totalDone=events.filter(e=>e.done).length;
+  const todayCount=events.filter(e=>e.date===today).length;
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Header */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+        <div>
+          <h1 style={{fontSize:20,fontWeight:700,letterSpacing:'-0.3px'}}>Calendario</h1>
+          <p style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Reuniones, tareas y recordatorios</p>
+        </div>
+        <Btn icon={Icons.plus} onClick={()=>setModal('new')}>Nuevo evento</Btn>
+      </div>
+
+      {/* Stats row */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
+        {[
+          {label:'Hoy',value:todayCount,color:'var(--primary)',bg:'var(--primary-light)'},
+          {label:'Pendientes',value:totalPending,color:'var(--warning)',bg:'var(--warning-bg)'},
+          {label:'Completados',value:totalDone,color:'var(--success)',bg:'var(--success-bg)'},
+        ].map(s=>(
+          <div key={s.label} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'14px 18px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <div>
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:4}}>{s.label}</div>
+              <div style={{fontSize:26,fontWeight:700,color:'var(--text)'}}>{s.value}</div>
+            </div>
+            <div style={{width:40,height:40,borderRadius:12,background:s.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>
+              {s.label==='Hoy'?'📅':s.label==='Pendientes'?'⏳':'✅'}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1fr 320px',gap:16}}>
+        {/* Grilla calendario */}
+        <Card style={{padding:0,overflow:'hidden'}}>
+          {/* Nav mes */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px',borderBottom:'1px solid var(--border)'}}>
+            <button onClick={prevMonth} style={{width:30,height:30,borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--text2)',fontSize:16}}>‹</button>
+            <span style={{fontWeight:700,fontSize:15,color:'var(--text)',textTransform:'capitalize'}}>{monthLabel}</span>
+            <button onClick={nextMonth} style={{width:30,height:30,borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--text2)',fontSize:16}}>›</button>
+          </div>
+
+          <div style={{padding:'0 12px 16px'}}>
+            {/* Headers días */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2,marginBottom:4,marginTop:12}}>
+              {DAYS.map(d=>(
+                <div key={d} style={{textAlign:'center',fontSize:11,fontWeight:600,color:'var(--text3)',padding:'4px 0'}}>{d}</div>
+              ))}
+            </div>
+
+            {/* Celdas */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2}}>
+              {/* Días vacíos al inicio */}
+              {Array.from({length:firstDay},(_,i)=>(
+                <div key={`empty-${i}`}/>
+              ))}
+              {/* Días del mes */}
+              {Array.from({length:daysInMonth},(_,i)=>{
+                const day=i+1;
+                const dateStr=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                const isToday=dateStr===today;
+                const isSelected=dateStr===selectedDate;
+                const dayEvs=eventsByDay[day]||[];
+                const hasPending=dayEvs.some(e=>!e.done);
+
+                return(
+                  <div key={day} onClick={()=>setSelectedDate(dateStr)} style={{
+                    minHeight:64,padding:'6px 4px',borderRadius:10,cursor:'pointer',
+                    background:isSelected?'var(--primary)':isToday?'var(--primary-light)':'transparent',
+                    border:`1.5px solid ${isSelected?'var(--primary)':isToday?'var(--primary)':'transparent'}`,
+                    transition:'all .15s',
+                    position:'relative',
+                  }}>
+                    <div style={{
+                      fontSize:13,fontWeight:isToday||isSelected?700:400,
+                      color:isSelected?'#fff':isToday?'var(--primary)':'var(--text)',
+                      textAlign:'center',marginBottom:4,
+                    }}>{day}</div>
+                    {/* Puntos de eventos */}
+                    <div style={{display:'flex',flexWrap:'wrap',gap:2,justifyContent:'center'}}>
+                      {dayEvs.slice(0,3).map((ev,ei)=>(
+                        <div key={ei} style={{
+                          width:6,height:6,borderRadius:'50%',
+                          background:isSelected?'rgba(255,255,255,0.7)':EVENT_TYPES[ev.type]?.color||'var(--primary)',
+                          opacity:ev.done?0.4:1,
+                        }}/>
+                      ))}
+                      {dayEvs.length>3&&<div style={{fontSize:9,color:isSelected?'rgba(255,255,255,0.7)':'var(--text3)'}}> +{dayEvs.length-3}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Leyenda tipos */}
+          <div style={{display:'flex',gap:14,padding:'12px 20px',borderTop:'1px solid var(--border)'}}>
+            {Object.entries(EVENT_TYPES).map(([k,v])=>(
+              <div key={k} style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text3)'}}>
+                <div style={{width:8,height:8,borderRadius:'50%',background:v.color}}/>
+                {v.label}
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Panel derecho: eventos del día + próximos */}
+        <div style={{display:'flex',flexDirection:'column',gap:12}}>
+          {/* Eventos del día seleccionado */}
+          <Card style={{padding:0,overflow:'hidden',flex:1}}>
+            <div style={{padding:'14px 16px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div>
+                <div style={{fontWeight:600,fontSize:13,color:'var(--text)'}}>
+                  {selectedDate===today?'Hoy':fmt(selectedDate)}
+                </div>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:1}}>
+                  {new Date(selectedDate+'T12:00').toLocaleString('es',{weekday:'long'})}
+                </div>
+              </div>
+              <button onClick={()=>setModal('new')} style={{width:28,height:28,borderRadius:8,background:'var(--primary)',border:'none',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#fff'}}>
+                {Icons.plus}
+              </button>
+            </div>
+
+            {/* Filtro tipo */}
+            <div style={{display:'flex',gap:4,padding:'10px 12px',borderBottom:'1px solid var(--border)',overflowX:'auto'}}>
+              {[['all','Todos'],['reunion','Reuniones'],['tarea','Tareas'],['recordatorio','Recordatorios']].map(([v,l])=>(
+                <button key={v} onClick={()=>setFilterType(v)} style={{
+                  padding:'4px 10px',borderRadius:99,fontSize:11,fontWeight:500,cursor:'pointer',whiteSpace:'nowrap',
+                  border:`1px solid ${filterType===v?(EVENT_TYPES[v]?.color||'var(--primary)'):'var(--border)'}`,
+                  background:filterType===v?(EVENT_TYPES[v]?.bg||'var(--primary-light)'):'transparent',
+                  color:filterType===v?(EVENT_TYPES[v]?.color||'var(--primary)'):'var(--text3)',
+                }}>{l}</button>
+              ))}
+            </div>
+
+            <div style={{maxHeight:320,overflowY:'auto'}}>
+              {loading?<Loading/>:dayEvents.length===0?(
+                <div style={{padding:'32px 16px',textAlign:'center',color:'var(--text3)',fontSize:12}}>
+                  Sin eventos para este día
+                  <div style={{marginTop:8}}>
+                    <button onClick={()=>setModal('new')} style={{color:'var(--primary)',fontSize:12,cursor:'pointer',background:'none',border:'none',fontWeight:500}}>+ Agregar uno</button>
+                  </div>
+                </div>
+              ):(
+                <div style={{display:'flex',flexDirection:'column'}}>
+                  {dayEvents.map(ev=>(
+                    <div key={ev.id} style={{
+                      display:'flex',alignItems:'flex-start',gap:10,padding:'11px 14px',
+                      borderBottom:'1px solid var(--border)',
+                      opacity:ev.done?0.55:1,transition:'opacity .2s',
+                    }}>
+                      {/* Check */}
+                      <button onClick={()=>toggleDone(ev)} style={{
+                        width:18,height:18,borderRadius:5,flexShrink:0,marginTop:1,cursor:'pointer',
+                        border:`2px solid ${EVENT_TYPES[ev.type]?.color||'var(--primary)'}`,
+                        background:ev.done?(EVENT_TYPES[ev.type]?.color||'var(--primary)'):'transparent',
+                        display:'flex',alignItems:'center',justifyContent:'center',
+                      }}>
+                        {ev.done&&<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 3" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/></svg>}
+                      </button>
+                      {/* Info */}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:6}}>
+                          <div style={{fontSize:13,fontWeight:500,color:'var(--text)',textDecoration:ev.done?'line-through':'none',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                            {ev.title}
+                          </div>
+                          <span style={{fontSize:10,fontWeight:600,color:EVENT_TYPES[ev.type]?.color,background:EVENT_TYPES[ev.type]?.bg,borderRadius:99,padding:'2px 7px',flexShrink:0}}>
+                            {EVENT_TYPES[ev.type]?.label}
+                          </span>
+                        </div>
+                        {ev.time&&<div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>🕐 {ev.time}</div>}
+                        {ev.description&&<div style={{fontSize:11,color:'var(--text3)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.description}</div>}
+                      </div>
+                      {/* Acciones */}
+                      <div style={{display:'flex',gap:6,flexShrink:0}}>
+                        <button onClick={()=>setModal(ev)} style={{color:'var(--primary)',background:'none',border:'none',cursor:'pointer',display:'flex',opacity:0.7}}>{Icons.settings2}</button>
+                        <button onClick={()=>del(ev.id)} style={{color:'var(--danger)',background:'none',border:'none',cursor:'pointer',display:'flex',opacity:0.7}}>{Icons.trash}</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Próximos eventos */}
+          <Card>
+            <CardHeader title="Próximos eventos"/>
+            {upcoming.length===0?<div style={{fontSize:12,color:'var(--text3)',textAlign:'center',padding:'16px 0'}}>Sin eventos próximos</div>:(
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {upcoming.map(ev=>{
+                  const daysUntil=Math.ceil((new Date(ev.date)-new Date(today))/(1000*60*60*24));
+                  return(
+                    <div key={ev.id} onClick={()=>{setSelectedDate(ev.date);setViewMonth({year:parseInt(ev.date.slice(0,4)),month:parseInt(ev.date.slice(5,7))-1});}}
+                      style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderRadius:10,background:'var(--surface2)',cursor:'pointer',border:'1px solid var(--border)'}}>
+                      <div style={{width:8,height:8,borderRadius:'50%',background:EVENT_TYPES[ev.type]?.color,flexShrink:0}}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:500,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ev.title}</div>
+                        <div style={{fontSize:10,color:'var(--text3)',marginTop:1}}>{fmt(ev.date)}{ev.time?` · ${ev.time}`:''}</div>
+                      </div>
+                      <div style={{fontSize:10,fontWeight:600,color:daysUntil===0?'var(--primary)':daysUntil<=2?'var(--danger)':'var(--text3)',flexShrink:0}}>
+                        {daysUntil===0?'Hoy':daysUntil===1?'Mañana':`${daysUntil}d`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
+
+      {/* Modal */}
+      {modal&&<EventModal
+        event={modal==='new'?null:modal}
+        selectedDate={selectedDate}
+        onClose={()=>setModal(null)}
+        onSave={()=>{setModal(null);load();}}
+      />}
+    </div>
+  );
+}
+
 const NAV=[
   {id:'dashboard',label:'Dashboard'},
   {id:'transacciones',label:'Transacciones'},
@@ -2345,10 +2683,11 @@ const NAV=[
   {id:'metas',label:'Metas'},
   {id:'historial',label:'Historial'},
   {id:'analytics',label:'Analytics'},
+  {id:'calendario',label:'Calendario'},
   {id:'asistente',label:'Asistente IA'},
   {id:'configuracion',label:'Configuración'},
 ];
-const PAGES={dashboard:Dashboard,transacciones:Transacciones,cuentas:Cuentas,presupuestos:Presupuestos,metas:Metas,historial:Historial,analytics:Analytics,asistente:Asistente,configuracion:Configuracion};
+const PAGES={dashboard:Dashboard,transacciones:Transacciones,cuentas:Cuentas,presupuestos:Presupuestos,metas:Metas,historial:Historial,analytics:Analytics,calendario:Calendario,asistente:Asistente,configuracion:Configuracion};
 
 function App(){
   const [page,setPage]=useState('dashboard');
@@ -2374,6 +2713,7 @@ function App(){
     {id:'metas',label:'Metas de ahorro',keywords:'objetivos goals ahorros'},
     {id:'historial',label:'Historial de saldos',keywords:'evolución balance cuenta tiempo gráfico'},
     {id:'analytics',label:'Analytics',keywords:'análisis comparativa mes categorias'},
+    {id:'calendario',label:'Calendario',keywords:'reuniones tareas recordatorios eventos agenda'},
     {id:'asistente',label:'Asistente IA',keywords:'chat ai inteligencia'},
     {id:'configuracion',label:'Configuración',keywords:'categorias settings ajustes'},
   ];
