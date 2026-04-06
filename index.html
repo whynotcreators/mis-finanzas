@@ -164,88 +164,114 @@ function DonutChart({data,colors,size=100}){
 }
 
 // ── MULTI-LINE CHART para historial de saldos ──────────────────────────
-function MultiLineChart({series, labels, height=200}){
-  // series: [{name, color, values:[]}]
-  // labels: string[]
+// Cada serie se normaliza en su propio rango para que todas sean visibles
+function MultiLineChart({series, labels, height=220}){
   const [tip,setTip]=useState(null);
-  const [hoverX,setHoverX]=useState(null);
-
-  const allVals=series.flatMap(s=>s.values);
-  const minV=Math.min(...allVals,0);
-  const maxV=Math.max(...allVals,0.01);
-  const range=maxV-minV||1;
-  const padT=16, padB=24, padL=0, padR=0;
-  const chartH=height-padT-padB;
+  const [hoverIdx,setHoverIdx]=useState(null);
   const n=labels.length;
+  const padT=12, padB=28;
+  const chartH=height-padT-padB;
 
-  const toX=i=>(n<=1?50:(i/(n-1))*100);
-  const toY=v=>padT+chartH-((v-minV)/range)*chartH;
+  // Normalizar cada serie en su propio rango 10%-90% del alto del chart
+  // Así aunque Binance=14000 y LemonCash=228, ambas se ven con variación
+  const normalizedSeries=series.map(s=>{
+    const vals=s.values;
+    const minV=Math.min(...vals);
+    const maxV=Math.max(...vals);
+    const range=maxV-minV;
+    // Si no hay variación, dibujar línea en el medio
+    const toY=v=>range===0
+      ? padT+chartH*0.5
+      : padT+chartH*0.9 - ((v-minV)/range)*chartH*0.8;
+    return{...s,toY,minV,maxV,range};
+  });
+
+  const toX=i=>n<=1?50:(i/(n-1))*100;
 
   const handleMouseMove=(e)=>{
     const rect=e.currentTarget.getBoundingClientRect();
-    const xPct=((e.clientX-rect.left)/rect.width)*100;
-    const idx=Math.round((xPct/100)*(n-1));
+    const xPct=((e.clientX-rect.left)/rect.width);
+    const idx=Math.round(xPct*(n-1));
     const clamped=Math.max(0,Math.min(n-1,idx));
-    setHoverX(clamped);
+    setHoverIdx(clamped);
     setTip({idx:clamped,label:labels[clamped],vals:series.map(s=>({name:s.name,color:s.color,value:s.values[clamped]}))});
   };
 
   return(
     <div style={{position:'relative',userSelect:'none'}}>
-      <svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="none"
-        style={{overflow:'visible',cursor:'crosshair'}}
-        onMouseMove={handleMouseMove} onMouseLeave={()=>{setHoverX(null);setTip(null);}}>
-        <defs>
-          {series.map((s,si)=>(
-            <linearGradient key={si} id={`mlg${si}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={s.color} stopOpacity="0.15"/>
-              <stop offset="100%" stopColor={s.color} stopOpacity="0"/>
-            </linearGradient>
-          ))}
-        </defs>
-        {/* Grid horizontals */}
-        {[0,0.25,0.5,0.75,1].map((t,i)=>{
-          const y=padT+chartH*t;
-          return<line key={i} x1="0" y1={y} x2="100" y2={y} stroke="var(--border)" strokeWidth="0.4" vectorEffect="non-scaling-stroke"/>;
-        })}
-        {/* Series */}
-        {series.map((s,si)=>{
-          const pts=s.values.map((v,i)=>`${toX(i)},${toY(v)}`).join(' ');
-          const areaPts=`0,${toY(minV)} `+s.values.map((v,i)=>`${toX(i)},${toY(v)}`).join(' ')+` 100,${toY(minV)}`;
-          return(
-            <g key={si}>
-              <polygon points={areaPts} fill={`url(#mlg${si})`}/>
-              <polyline points={pts} fill="none" stroke={s.color} strokeWidth="1.8"
-                strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
-            </g>
-          );
-        })}
-        {/* Hover line */}
-        {hoverX!==null&&(
-          <line x1={toX(hoverX)} y1={padT} x2={toX(hoverX)} y2={padT+chartH}
-            stroke="var(--primary)" strokeWidth="0.8" strokeDasharray="2,1" vectorEffect="non-scaling-stroke"/>
-        )}
-        {/* Dots on hover */}
-        {hoverX!==null&&series.map((s,si)=>(
-          <circle key={si} cx={toX(hoverX)} cy={toY(s.values[hoverX]||0)} r="3"
-            fill={s.color} stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-        ))}
-      </svg>
-      {/* X labels */}
-      <div style={{display:'flex',justifyContent:'space-between',marginTop:4,paddingLeft:0}}>
-        {labels.map((l,i)=>(
-          <span key={i} style={{fontSize:10,color:hoverX===i?'var(--primary)':'var(--text3)',
-            fontWeight:hoverX===i?700:400,textAlign:'center',flex:1,
-            display:i===0||i===labels.length-1||(i%(Math.ceil(n/6))===0)?'block':'none'}}>
-            {l}
-          </span>
-        ))}
+      {/* Leyenda de escala independiente */}
+      <div style={{fontSize:10,color:'var(--text3)',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
+        <span style={{background:'var(--surface2)',borderRadius:4,padding:'2px 8px'}}>
+          📐 Escala independiente por cuenta — los valores reales se ven en el tooltip
+        </span>
       </div>
+
+      <div style={{position:'relative',height,cursor:'crosshair'}}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={()=>{setHoverIdx(null);setTip(null);}}>
+
+        <svg width="100%" height={height} style={{position:'absolute',top:0,left:0,overflow:'visible'}}
+          viewBox={`0 0 100 ${height}`} preserveAspectRatio="none">
+          <defs>
+            {normalizedSeries.map((s,si)=>(
+              <linearGradient key={si} id={`mlg${si}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={s.color} stopOpacity="0.12"/>
+                <stop offset="100%" stopColor={s.color} stopOpacity="0"/>
+              </linearGradient>
+            ))}
+          </defs>
+          {/* Grid lines */}
+          {[0.1,0.35,0.6,0.85].map((t,i)=>(
+            <line key={i} x1="0" y1={padT+chartH*t} x2="100" y2={padT+chartH*t}
+              stroke="var(--border)" strokeWidth="0.5" vectorEffect="non-scaling-stroke"/>
+          ))}
+          {/* Líneas por serie */}
+          {normalizedSeries.map((s,si)=>{
+            const pts=s.values.map((v,i)=>`${toX(i)},${s.toY(v)}`).join(' ');
+            const bottom=padT+chartH*0.9;
+            const areaPts=`0,${bottom} `+s.values.map((v,i)=>`${toX(i)},${s.toY(v)}`).join(' ')+` 100,${bottom}`;
+            return(
+              <g key={si}>
+                <polygon points={areaPts} fill={`url(#mlg${si})`}/>
+                <polyline points={pts} fill="none" stroke={s.color} strokeWidth="2"
+                  strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+              </g>
+            );
+          })}
+          {/* Línea vertical hover */}
+          {hoverIdx!==null&&(
+            <line x1={toX(hoverIdx)} y1={padT} x2={toX(hoverIdx)} y2={padT+chartH}
+              stroke="var(--primary)" strokeWidth="0.8" strokeDasharray="2,2" vectorEffect="non-scaling-stroke"/>
+          )}
+          {/* Puntos hover */}
+          {hoverIdx!==null&&normalizedSeries.map((s,si)=>(
+            <circle key={si}
+              cx={toX(hoverIdx)} cy={s.toY(s.values[hoverIdx]||0)} r="3.5"
+              fill={s.color} stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+          ))}
+        </svg>
+
+        {/* Labels X — HTML puro para que no se distorsionen */}
+        <div style={{position:'absolute',bottom:0,left:0,right:0,display:'flex'}}>
+          {labels.map((l,i)=>{
+            const show=i===0||i===n-1||i===Math.floor(n/2)||(n>12&&i%(Math.ceil(n/6))===0);
+            return(
+              <div key={i} style={{flex:1,textAlign:'center',fontSize:10,
+                color:hoverIdx===i?'var(--primary)':'var(--text3)',
+                fontWeight:hoverIdx===i?700:400,
+                visibility:show||hoverIdx===i?'visible':'hidden'}}>
+                {l}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Tooltip */}
       {tip&&(
         <div style={{
-          position:'absolute',top:0,
-          left:`${Math.min(Math.max((tip.idx/(n-1))*100,10),75)}%`,
+          position:'absolute',top:padT,
+          left:`${Math.min(Math.max((tip.idx/(Math.max(n-1,1)))*100,15),75)}%`,
           background:'var(--surface)',border:'1px solid var(--border)',
           borderRadius:10,padding:'10px 14px',fontSize:12,
           pointerEvents:'none',whiteSpace:'nowrap',
@@ -255,11 +281,11 @@ function MultiLineChart({series, labels, height=200}){
           <div style={{fontWeight:700,color:'var(--text)',marginBottom:6,fontSize:12}}>{tip.label}</div>
           {tip.vals.map((v,i)=>(
             <div key={i} style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:2}}>
-              <span style={{color:v.color,display:'flex',alignItems:'center',gap:5}}>
+              <span style={{display:'flex',alignItems:'center',gap:5,color:v.color}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:v.color,display:'inline-block'}}/>
                 {v.name}
               </span>
-              <span style={{fontWeight:600,color:'var(--text)'}}>${money(v.value||0,0)}</span>
+              <span style={{fontWeight:600,color:'var(--text)'}}>${money(v.value||0,2)}</span>
             </div>
           ))}
         </div>
