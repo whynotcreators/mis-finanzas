@@ -311,13 +311,16 @@ function Dashboard(){
   const [loading,setLoading]=useState(true);
   const [selectedMonth,setSelectedMonth]=useState(new Date().toISOString().slice(0,7));
 
+  const [budgets,setBudgets]=useState([]);
+
   useEffect(()=>{
     (async()=>{
-      const [t,a]=await Promise.all([
+      const [t,a,b]=await Promise.all([
         sb.from('transactions').select('*,categories(name)').order('date',{ascending:false}),
         sb.from('accounts').select('*').eq('is_active',true),
+        sb.from('budgets').select('*,categories(name)'),
       ]);
-      setTxns(t.data||[]);setAccs(a.data||[]);setLoading(false);
+      setTxns(t.data||[]);setAccs(a.data||[]);setBudgets(b.data||[]);setLoading(false);
     })();
   },[]);
 
@@ -392,6 +395,55 @@ function Dashboard(){
             <StatCard label="Gastos del mes" value={`$${ei}`} cents={ed}
               trend={expDiff!==null?`${Math.abs(expDiff).toFixed(1)}%`:null} trendUp={expDiff<0}/>
             <StatCard label="Ahorros totales" value={`$${si}`} cents={sd}/>
+          </div>
+        );
+      })()}
+
+      {/* ── ALERTAS DE PRESUPUESTO ─────────────────────────────────── */}
+      {(()=>{
+        // Traer presupuestos del mes actual y comparar con gastos reales
+        const alerts = [];
+
+        // Necesitamos los presupuestos — los buscamos en el useEffect
+        // Los calculamos desde las transacciones del mes vs presupuestos cargados
+        if(budgets && budgets.length > 0){
+          budgets.forEach(b => {
+            const spent = month.filter(t => t.category_id === b.category_id && t.type === 'expense')
+              .reduce((s,t) => s + Number(t.amount), 0);
+            const pct = b.amount_planned > 0 ? (spent / b.amount_planned) * 100 : 0;
+            if(pct >= 100) alerts.push({ name: b.categories?.name, spent, planned: b.amount_planned, pct, level: 'exceeded' });
+            else if(pct >= 80) alerts.push({ name: b.categories?.name, spent, planned: b.amount_planned, pct, level: 'warning' });
+          });
+        }
+        if(alerts.length === 0) return null;
+        return(
+          <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            {alerts.map((a,i)=>(
+              <div key={i} style={{
+                borderRadius:12, padding:'12px 16px',
+                background: a.level==='exceeded' ? 'var(--danger-bg)' : 'var(--warning-bg)',
+                border: `1px solid ${a.level==='exceeded' ? '#fecaca' : '#fde68a'}`,
+                display:'flex', alignItems:'center', gap:12
+              }}>
+                <span style={{fontSize:18,flexShrink:0}}>{a.level==='exceeded'?'🔴':'🟡'}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:600,color:'var(--text)'}}>
+                    {a.level==='exceeded'
+                      ? `Superaste el presupuesto de ${a.name}`
+                      : `Llegaste al ${a.pct.toFixed(0)}% del presupuesto de ${a.name}`}
+                  </div>
+                  <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>
+                    Gastaste <strong>${money(a.spent,0)}</strong> de <strong>${money(a.planned,0)}</strong> planificados
+                    {a.level==='exceeded' && ` — superaste por $${money(a.spent-a.planned,0)}`}
+                  </div>
+                </div>
+                <div style={{
+                  fontSize:13,fontWeight:800,
+                  color: a.level==='exceeded'?'var(--danger)':'var(--warning)',
+                  flexShrink:0
+                }}>{a.pct.toFixed(0)}%</div>
+              </div>
+            ))}
           </div>
         );
       })()}
