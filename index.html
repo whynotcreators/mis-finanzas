@@ -73,22 +73,39 @@ const money = (v,dec=2) => Number(v||0).toLocaleString('es-AR',{minimumFractionD
 // ── MINI CHARTS (SVG nativo) ─────────────────────────────────────────────
 function BarChart({data,keys,colors,height=140}){
   const [tip,setTip]=useState(null);
+  const [hoverIdx,setHoverIdx]=useState(null);
   const max=Math.max(...data.flatMap(d=>keys.map(k=>d[k]||0)),1);
-  const W=100/data.length, bW=W*0.32;
   return(
     <div style={{position:'relative'}}>
-      <svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="none">
-        {data.map((d,i)=>keys.map((k,ki)=>{
-          const bh=((d[k]||0)/max)*(height-20);
-          const x=i*W+ki*(bW+0.5)+W*0.08;
-          return <rect key={k+i} x={x} y={height-20-bh} width={bW} height={Math.max(bh,0)} fill={colors[ki]} rx="2"
-            onMouseEnter={()=>setTip({i,label:d.label,vals:keys.map((k2,ki2)=>({k:k2,v:d[k2]||0,c:colors[ki2]}))})}
-            onMouseLeave={()=>setTip(null)} style={{cursor:'default'}}/>;
-        }))}
-        {data.map((d,i)=><text key={i} x={i*W+W/2} y={height-6} textAnchor="middle" fontSize="5" fill="var(--text3)">{d.label}</text>)}
-      </svg>
-      {tip&&<div style={{position:'absolute',top:8,left:'50%',transform:'translateX(-50%)',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:'6px 10px',fontSize:11,pointerEvents:'none',whiteSpace:'nowrap',boxShadow:'0 4px 12px rgba(0,0,0,0.1)',zIndex:10}}>
-        <div style={{fontWeight:600,marginBottom:3,color:'var(--text)'}}>{tip.label}</div>
+      {/* Barras con HTML puro — sin SVG, sin distorsión */}
+      <div style={{display:'flex',alignItems:'flex-end',height:height,gap:0}}>
+        {data.map((d,i)=>(
+          <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',height:'100%',position:'relative',cursor:'default'}}
+            onMouseEnter={()=>{setHoverIdx(i);setTip({label:d.label,vals:keys.map((k,ki)=>({k,v:d[k]||0,c:colors[ki]}))});}}
+            onMouseLeave={()=>{setHoverIdx(null);setTip(null);}}>
+            {/* Área de barras */}
+            <div style={{flex:1,display:'flex',alignItems:'flex-end',gap:'2px',width:'100%',padding:'0 10%',
+              background:hoverIdx===i?'rgba(132,112,255,0.06)':'transparent',borderRadius:4,transition:'background .15s'}}>
+              {keys.map((k,ki)=>{
+                const pct=((d[k]||0)/max)*100;
+                return(
+                  <div key={k} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'stretch',height:'100%',justifyContent:'flex-end'}}>
+                    <div style={{background:colors[ki],borderRadius:'3px 3px 0 0',height:`${Math.max(pct,0.3)}%`,transition:'height .4s',minHeight:pct>0?2:0}}/>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Label mes — fuera del SVG, nunca se distorsiona */}
+            <div style={{fontSize:11,color:hoverIdx===i?'var(--primary)':'var(--text3)',marginTop:5,fontWeight:hoverIdx===i?600:400,
+              textAlign:'center',width:'100%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',padding:'0 2px'}}>
+              {d.label}
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* Tooltip */}
+      {tip&&<div style={{position:'absolute',top:4,left:'50%',transform:'translateX(-50%)',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',fontSize:11,pointerEvents:'none',whiteSpace:'nowrap',boxShadow:'0 4px 16px rgba(0,0,0,0.15)',zIndex:10}}>
+        <div style={{fontWeight:700,marginBottom:4,color:'var(--text)',fontSize:12}}>{tip.label}</div>
         {tip.vals.map(v=><div key={v.k} style={{color:v.c}}>${money(v.v,0)}</div>)}
       </div>}
     </div>
@@ -96,17 +113,29 @@ function BarChart({data,keys,colors,height=140}){
 }
 function LineChart({data,dataKey,color='var(--primary)',height=48}){
   const vals=data.map(d=>d[dataKey]||0);
-  const min=Math.min(...vals),max=Math.max(...vals,min+1);
-  const pts=vals.map((v,i)=>`${(i/Math.max(vals.length-1,1))*100},${height-((v-min)/(max-min))*(height-4)-2}`).join(' ');
+  const min=Math.min(...vals);
+  const max=Math.max(...vals,min+0.01);
+  const range=max-min||1;
+  // Normalizar: el min va al fondo, el max va arriba — funciona con negativos
+  const toY=v=>height-4-((v-min)/range)*(height-8);
+  const n=vals.length;
+  const pts=vals.map((v,i)=>`${(i/Math.max(n-1,1))*100},${toY(v)}`).join(' ');
+  const zeroY=toY(0); // línea del cero
   return(
-    <svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="none">
-      <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor={color} stopOpacity="0.15"/>
-        <stop offset="100%" stopColor={color} stopOpacity="0"/>
-      </linearGradient></defs>
-      <polygon points={`0,${height} ${pts} 100,${height}`} fill="url(#lg)"/>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
-    </svg>
+    <div style={{position:'relative',height}}>
+      <svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="xMidYMid meet" style={{overflow:'visible'}}>
+        <defs>
+          <linearGradient id="lg2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.2"/>
+            <stop offset="100%" stopColor={color} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        {/* Línea del cero si hay valores negativos */}
+        {min<0&&<line x1="0" y1={zeroY} x2="100" y2={zeroY} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="2,1"/>}
+        <polygon points={`0,${height} ${pts} 100,${height}`} fill="url(#lg2)"/>
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
+      </svg>
+    </div>
   );
 }
 function DonutChart({data,colors,size=100}){
