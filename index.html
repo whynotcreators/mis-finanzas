@@ -12,10 +12,10 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'DM Sans', sans-serif; background: #f7f7f8; color: #111827; min-height: 100vh; }
+  body { font-family: 'DM Sans', sans-serif; background: #f4f5f7; color: #111827; min-height: 100vh; }
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 99px; }
   input, select, textarea { font-family: inherit; }
   button { font-family: inherit; cursor: pointer; border: none; background: none; }
   table { border-collapse: collapse; width: 100%; }
@@ -154,10 +154,10 @@ function Select({ children, ...p }) {
 
 function Btn({ variant='primary', ...p }) {
   const styles = {
-    primary: { background:'#7c5cfc', color:'#fff' },
+    primary: { background:'linear-gradient(135deg,#7c5cfc,#6d28d9)', color:'#fff', boxShadow:'0 2px 8px rgba(124,92,252,0.35)' },
     outline: { background:'#fff', color:'#374151', border:'1px solid #e5e7eb' },
     danger:  { background:'#fef2f2', color:'#ef4444', border:'1px solid #fecaca' },
-    green:   { background:'#22c55e', color:'#fff' },
+    green:   { background:'linear-gradient(135deg,#22c55e,#16a34a)', color:'#fff', boxShadow:'0 2px 8px rgba(34,197,94,0.3)' },
   };
   return <button {...p} style={{
     borderRadius:12, padding:'10px 18px', fontSize:14, fontWeight:500,
@@ -167,7 +167,7 @@ function Btn({ variant='primary', ...p }) {
 }
 
 function Card({ children, style }) {
-  return <div style={{ background:'#fff', border:'1px solid #f0f0f2', borderRadius:14, padding:16, ...style }}>{children}</div>;
+  return <div style={{ background:'#fff', border:'1px solid #eaecf0', borderRadius:16, padding:18, boxShadow:'0 1px 4px rgba(0,0,0,0.06)', ...style }}>{children}</div>;
 }
 
 function Stat({ label, value, color, sub }) {
@@ -605,34 +605,59 @@ function AccountModal({ account, onClose, onSave }) {
   </Modal>;
 }
 
+const ACC_GRADIENTS = {
+  bank: 'linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%)',
+  cash: 'linear-gradient(135deg, #78350f 0%, #f59e0b 100%)',
+  digital_wallet: 'linear-gradient(135deg, #0c4a6e 0%, #00b1ef 100%)',
+  investment: 'linear-gradient(135deg, #713f12 0%, #f0b90b 100%)',
+  other: 'linear-gradient(135deg, #4c1d95 0%, #7c5cfc 100%)',
+};
+
 function AccountCard({ account, onEdit, onDelete }) {
-  const color = ACC_COLORS[account.type]||'#7c5cfc';
+  const gradient = ACC_GRADIENTS[account.type] || ACC_GRADIENTS.other;
   const initials = account.name.slice(0,2).toUpperCase();
   const del = async () => {
     if (!window.confirm('¿Eliminar esta cuenta?')) return;
     await sb.from('accounts').delete().eq('id', account.id);
     onDelete();
   };
-  return <Card style={{ display:'flex', flexDirection:'column', gap:8 }}>
-    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-      <div style={{ width:36, height:36, borderRadius:10, background:color+'18', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-        {account.logo_url ? <img src={account.logo_url} alt={account.name} style={{ width:28, height:28, objectFit:'contain' }} />
-          : <span style={{ fontSize:12, fontWeight:600, color }}>{initials}</span>}
+  return (
+    <div style={{ borderRadius:18, overflow:'hidden', boxShadow:'0 4px 20px rgba(0,0,0,0.12)', position:'relative' }}>
+      {/* Card front - gradient */}
+      <div style={{ background: gradient, padding:'20px 20px 16px', position:'relative', minHeight:130 }}>
+        {/* Decorative circles */}
+        <div style={{ position:'absolute', top:-20, right:-20, width:100, height:100, borderRadius:'50%', background:'rgba(255,255,255,0.07)' }}></div>
+        <div style={{ position:'absolute', bottom:-30, right:20, width:80, height:80, borderRadius:'50%', background:'rgba(255,255,255,0.05)' }}></div>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16 }}>
+          <div style={{ width:40, height:40, borderRadius:12, background:'rgba(255,255,255,0.2)', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', backdropFilter:'blur(4px)' }}>
+            {account.logo_url
+              ? <img src={account.logo_url} alt={account.name} style={{ width:32, height:32, objectFit:'contain' }} />
+              : <span style={{ fontSize:14, fontWeight:700, color:'#fff' }}>{initials}</span>}
+          </div>
+          <span style={{ fontSize:10, color:'rgba(255,255,255,0.7)', background:'rgba(255,255,255,0.15)', borderRadius:99, padding:'3px 10px', backdropFilter:'blur(4px)' }}>
+            {ACC_LABELS[account.type]}
+          </span>
+        </div>
+        <div style={{ color:'rgba(255,255,255,0.85)', fontSize:13, fontWeight:500, marginBottom:4 }}>{account.name}</div>
+        {account.description && <div style={{ color:'rgba(255,255,255,0.55)', fontSize:11, marginBottom:8 }}>{account.description}</div>}
+        <div style={{ fontSize:22, fontWeight:700, color:'#fff', letterSpacing:'-0.5px' }}>
+          {Number(account.balance).toLocaleString('es-AR',{minimumFractionDigits:2})}
+          <span style={{ fontSize:13, color:'rgba(255,255,255,0.6)', marginLeft:5, fontWeight:400 }}>{account.currency}</span>
+        </div>
       </div>
-      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-        <span style={{ fontSize:10, color:'#9ca3af', background:'#f9fafb', borderRadius:99, padding:'2px 8px' }}>{ACC_LABELS[account.type]}</span>
-        <button onClick={() => onEdit(account)} style={{ fontSize:11, color:'#7c5cfc', cursor:'pointer', background:'none', border:'none' }}>Editar</button>
-        <button onClick={del} style={{ fontSize:11, color:'#f87171', cursor:'pointer', background:'none', border:'none' }}>Eliminar</button>
+      {/* Card footer */}
+      <div style={{ background:'#fff', padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <span style={{ fontSize:11, color: account.is_active?'#22c55e':'#9ca3af', display:'flex', alignItems:'center', gap:4 }}>
+          <span style={{ width:5, height:5, borderRadius:'50%', background: account.is_active?'#22c55e':'#9ca3af', display:'inline-block' }}></span>
+          {account.is_active?'Activa':'Inactiva'}
+        </span>
+        <div style={{ display:'flex', gap:10 }}>
+          <button onClick={() => onEdit(account)} style={{ fontSize:12, color:'#7c5cfc', cursor:'pointer', background:'none', border:'none', fontWeight:500 }}>Editar</button>
+          <button onClick={del} style={{ fontSize:12, color:'#f87171', cursor:'pointer', background:'none', border:'none' }}>Eliminar</button>
+        </div>
       </div>
     </div>
-    <div style={{ fontWeight:500, fontSize:14 }}>{account.name}</div>
-    {account.description && <div style={{ fontSize:12, color:'#9ca3af' }}>{account.description}</div>}
-    <div style={{ fontSize:20, fontWeight:600, marginTop:4 }}>
-      {Number(account.balance).toLocaleString('es-AR',{minimumFractionDigits:2})}
-      <span style={{ fontSize:12, color:'#9ca3af', marginLeft:4 }}>{account.currency}</span>
-    </div>
-    <div style={{ fontSize:12, color:'#9ca3af', borderTop:'1px solid #f3f4f6', paddingTop:8 }}>{account.is_active?'Activa':'Inactiva'}</div>
-  </Card>;
+  );
 }
 
 function Cuentas() {
@@ -659,11 +684,13 @@ function Cuentas() {
         </div>
         <Btn onClick={() => setModal('new')}>+ Nueva cuenta</Btn>
       </div>
-      <div style={{ background:'#7c5cfc', borderRadius:18, padding:20, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-        <div>
-          <div style={{ fontSize:12, color:'#c4b5fd', marginBottom:4 }}>Balance total consolidado</div>
-          <div style={{ fontSize:28, fontWeight:600, color:'#fff' }}>${totalUSD.toLocaleString('en-US',{minimumFractionDigits:2})} USD</div>
-          <div style={{ fontSize:12, color:'#c4b5fd', marginTop:4 }}>{activeCount} cuentas activas</div>
+      <div style={{ background:'linear-gradient(135deg,#5b21b6 0%,#7c5cfc 60%,#a78bfa 100%)', borderRadius:20, padding:'24px 28px', display:'flex', justifyContent:'space-between', alignItems:'center', boxShadow:'0 4px 20px rgba(124,92,252,0.3)', position:'relative', overflow:'hidden' }}>
+        <div style={{ position:'absolute', top:-30, right:-20, width:140, height:140, borderRadius:'50%', background:'rgba(255,255,255,0.07)' }}></div>
+        <div style={{ position:'absolute', bottom:-40, right:80, width:100, height:100, borderRadius:'50%', background:'rgba(255,255,255,0.05)' }}></div>
+        <div style={{ position:'relative' }}>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,0.65)', marginBottom:6, letterSpacing:'0.5px', textTransform:'uppercase' }}>Balance total consolidado</div>
+          <div style={{ fontSize:32, fontWeight:700, color:'#fff', letterSpacing:'-1px' }}>${totalUSD.toLocaleString('en-US',{minimumFractionDigits:2})} <span style={{ fontSize:16, fontWeight:400, opacity:0.7 }}>USD</span></div>
+          <div style={{ fontSize:12, color:'rgba(255,255,255,0.55)', marginTop:6 }}>{activeCount} cuentas activas</div>
         </div>
       </div>
       {loading ? <Loading /> : (
@@ -1208,34 +1235,42 @@ function App() {
     <div style={{ display:'flex', minHeight:'100vh' }}>
       {/* Sidebar */}
       <aside style={{
-        width:220, background:'#fff', borderRight:'1px solid #f0f0f2',
-        display:'flex', flexDirection:'column', position:'fixed', top:0, left:0, bottom:0, zIndex:100
+        width:224, background:'#fff', borderRight:'1px solid #eaecf0',
+        display:'flex', flexDirection:'column', position:'fixed', top:0, left:0, bottom:0, zIndex:100,
+        boxShadow:'2px 0 8px rgba(0,0,0,0.04)'
       }}>
-        <div style={{ padding:'24px 20px 20px' }}>
-          <div style={{ fontWeight:700, fontSize:17, color:'#111827', letterSpacing:'-0.5px' }}>💰 Mis Finanzas</div>
+        <div style={{ padding:'24px 20px 16px', borderBottom:'1px solid #f3f4f6' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <div style={{ width:32, height:32, borderRadius:10, background:'linear-gradient(135deg,#7c5cfc,#a78bfa)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>💰</div>
+            <div>
+              <div style={{ fontWeight:700, fontSize:15, color:'#111827', letterSpacing:'-0.3px' }}>Mis Finanzas</div>
+              <div style={{ fontSize:11, color:'#9ca3af' }}>Panel personal</div>
+            </div>
+          </div>
         </div>
-        <nav style={{ flex:1, padding:'0 10px', display:'flex', flexDirection:'column', gap:2 }}>
+        <nav style={{ flex:1, padding:'12px 10px', display:'flex', flexDirection:'column', gap:2 }}>
           {NAV.map(n => (
             <button key={n.id} onClick={() => setPage(n.id)} style={{
               display:'flex', alignItems:'center', gap:10, padding:'9px 12px', borderRadius:10,
-              background: page===n.id ? '#f3f0ff':'transparent',
-              color: page===n.id ? '#7c5cfc':'#374151',
-              fontWeight: page===n.id ? 500:400,
+              background: page===n.id ? 'linear-gradient(135deg,#ede9fe,#f3f0ff)':'transparent',
+              color: page===n.id ? '#6d28d9':'#4b5563',
+              fontWeight: page===n.id ? 600:400,
               fontSize:14, width:'100%', textAlign:'left', cursor:'pointer', border:'none',
-              transition:'background .15s'
+              transition:'all .15s', boxShadow: page===n.id ? '0 1px 3px rgba(124,92,252,0.15)':'none'
             }}>
-              <span style={{ fontSize:15, opacity:page===n.id?1:0.5 }}>{n.icon}</span>
+              <span style={{ fontSize:15, opacity:page===n.id?1:0.6 }}>{n.icon}</span>
               {n.label}
             </button>
           ))}
         </nav>
-        <div style={{ padding:'16px 20px', borderTop:'1px solid #f3f4f6', fontSize:12, color:'#9ca3af' }}>
-          Mis Finanzas v2.0
+        <div style={{ padding:'14px 20px', borderTop:'1px solid #f3f4f6', fontSize:11, color:'#9ca3af', display:'flex', alignItems:'center', gap:6 }}>
+          <div style={{ width:6, height:6, borderRadius:'50%', background:'#22c55e' }}></div>
+          Conectado a Supabase
         </div>
       </aside>
 
       {/* Main content */}
-      <main style={{ marginLeft:220, flex:1, padding:28, minHeight:'100vh' }}>
+      <main style={{ marginLeft:224, flex:1, padding:32, minHeight:'100vh', maxWidth:'calc(100vw - 224px)' }}>
         <Page />
       </main>
     </div>
