@@ -448,6 +448,112 @@ function Dashboard(){
         );
       })()}
 
+      {/* ── PROYECCIÓN DE FLUJO DE CAJA ──────────────────────────── */}
+      {(()=>{
+        const today = new Date();
+        const dayOfMonth = today.getDate();
+        const daysInMonth = new Date(today.getFullYear(), today.getMonth()+1, 0).getDate();
+        const daysLeft = daysInMonth - dayOfMonth;
+        const pctMonthElapsed = (dayOfMonth / daysInMonth) * 100;
+
+        // Solo mostrar si estamos en el mes actual
+        const currentMonth = today.toISOString().slice(0,7);
+        if(selectedMonth !== currentMonth) return null;
+        if(month.length === 0 && income === 0) return null;
+
+        // Gastos fijos del mes (alquiler, servicios, subs) — categorizados como fijos
+        const fixedCats = ['Alquiler','Servicios'];
+        const fixedExp = month.filter(t => t.type==='expense' && fixedCats.includes(t.categories?.name))
+          .reduce((s,t) => s+Number(t.amount), 0);
+
+        // Gastos variables (todo lo demás)
+        const varExp = expenses - fixedExp;
+
+        // Promedio diario de gastos variables
+        const avgVarPerDay = dayOfMonth > 0 ? varExp / dayOfMonth : 0;
+
+        // Proyección gastos variables restantes
+        const projectedVarExp = avgVarPerDay * daysLeft;
+
+        // Presupuestos fijos que faltan pagar (si aún no se registraron)
+        const fixedBudgetTotal = budgets
+          .filter(b => fixedCats.includes(b.categories?.name))
+          .reduce((s,b) => s+Number(b.amount_planned), 0);
+        const fixedPending = Math.max(fixedBudgetTotal - fixedExp, 0);
+
+        // Total proyectado de gastos al fin de mes
+        const totalProjectedExp = expenses + projectedVarExp + fixedPending;
+
+        // Flujo neto proyectado
+        const projectedNet = income - totalProjectedExp;
+
+        // Balance proyectado al fin de mes (balance actual + ingresos pendientes - gastos pendientes)
+        const currentBalance = accs.filter(a=>a.currency==='USD').reduce((s,a)=>s+Number(a.balance),0);
+        const projectedBalance = currentBalance - projectedVarExp - fixedPending;
+
+        const isGood = projectedNet >= 0 || projectedBalance > 0;
+
+        return(
+          <Card style={{background: isGood ? 'var(--surface)' : 'var(--danger-bg)', border: isGood ? '1px solid var(--border)' : '1px solid #fecaca'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+              <div>
+                <div style={{fontWeight:600,fontSize:14,color:'var(--text)'}}>📊 Proyección de flujo de caja</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>Día {dayOfMonth} de {daysInMonth} — quedan {daysLeft} días</div>
+              </div>
+              {/* Barra de progreso del mes */}
+              <div style={{width:140}}>
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--text3)',marginBottom:3}}>
+                  <span>Inicio</span><span style={{color:'var(--primary)',fontWeight:600}}>Hoy {pctMonthElapsed.toFixed(0)}%</span><span>Fin</span>
+                </div>
+                <div style={{height:5,background:'var(--surface2)',borderRadius:99,overflow:'hidden'}}>
+                  <div style={{height:5,width:`${pctMonthElapsed}%`,background:'var(--primary)',borderRadius:99}}/>
+                </div>
+              </div>
+            </div>
+
+            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
+              {/* Gastos hasta hoy */}
+              <div style={{background:'var(--surface2)',borderRadius:10,padding:'10px 14px'}}>
+                <div style={{fontSize:10,color:'var(--text3)',marginBottom:4}}>Gastado hasta hoy</div>
+                <div style={{fontSize:18,fontWeight:700,color:'var(--danger)'}}>${money(expenses,0)}</div>
+                <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>{pctMonthElapsed.toFixed(0)}% del mes</div>
+              </div>
+
+              {/* Proyección gastos variables restantes */}
+              <div style={{background:'var(--surface2)',borderRadius:10,padding:'10px 14px'}}>
+                <div style={{fontSize:10,color:'var(--text3)',marginBottom:4}}>Gastos variables est.</div>
+                <div style={{fontSize:18,fontWeight:700,color:'var(--warning)'}}>${money(projectedVarExp,0)}</div>
+                <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>${money(avgVarPerDay,0)}/día × {daysLeft} días</div>
+              </div>
+
+              {/* Gastos fijos pendientes */}
+              <div style={{background:'var(--surface2)',borderRadius:10,padding:'10px 14px'}}>
+                <div style={{fontSize:10,color:'var(--text3)',marginBottom:4}}>Gastos fijos pendientes</div>
+                <div style={{fontSize:18,fontWeight:700,color:fixedPending>0?'var(--danger)':'var(--success)'}}>${money(fixedPending,0)}</div>
+                <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>{fixedPending>0?'Alquiler/servicios':'Todo pagado ✓'}</div>
+              </div>
+
+              {/* Balance proyectado fin de mes */}
+              <div style={{background:projectedBalance>=0?'var(--success-bg)':'var(--danger-bg)',borderRadius:10,padding:'10px 14px',border:`1px solid ${projectedBalance>=0?'#bbf7d0':'#fecaca'}`}}>
+                <div style={{fontSize:10,color:'var(--text3)',marginBottom:4}}>Balance estimado fin de mes</div>
+                <div style={{fontSize:18,fontWeight:700,color:projectedBalance>=0?'var(--success)':'var(--danger)'}}>${money(projectedBalance,0)}</div>
+                <div style={{fontSize:10,color:projectedBalance>=0?'var(--success)':'var(--danger)',marginTop:2}}>
+                  {projectedBalance>=0?'✓ Vas bien':'⚠ Revisá tus gastos'}
+                </div>
+              </div>
+            </div>
+
+            {/* Mensaje contextual */}
+            <div style={{marginTop:10,fontSize:12,color:'var(--text2)',background:'var(--surface2)',borderRadius:8,padding:'8px 12px',lineHeight:1.5}}>
+              {projectedBalance >= 0
+                ? `A este ritmo vas a terminar el mes con ~$${money(projectedBalance,0)} en tus cuentas. ${avgVarPerDay>0?`Estás gastando $${money(avgVarPerDay,0)} por día en gastos variables.`:''}`
+                : `⚠️ A este ritmo tus gastos superarían tu balance actual. Considerá reducir gastos variables (~$${money(avgVarPerDay,0)}/día).`
+              }
+            </div>
+          </Card>
+        );
+      })()}
+
       {/* Charts row */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 320px',gap:12}}>
         <Card>
