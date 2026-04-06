@@ -527,7 +527,14 @@ function TxModal({accounts,categories,onClose,onSave}){
   const save=async()=>{
     if(ref.current||!amount||!accountId)return;
     ref.current=true;setSaving(true);
-    await sb.from('transactions').insert({account_id:accountId,category_id:categoryId||null,amount:parseFloat(amount),type,date,description:desc,payment_method:method,is_recurring:recurring,is_impulsive:impulsive});
+    const amt=parseFloat(amount);
+    await sb.from('transactions').insert({account_id:accountId,category_id:categoryId||null,amount:amt,type,date,description:desc,payment_method:method,is_recurring:recurring,is_impulsive:impulsive});
+    // Actualizar saldo de la cuenta automáticamente
+    if(type==='expense'||type==='income'){
+      const {data:acc}=await sb.from('accounts').select('balance').eq('id',accountId).single();
+      const delta=type==='income'?amt:-amt;
+      await sb.from('accounts').update({balance:Number(acc.balance)+delta}).eq('id',accountId);
+    }
     ref.current=false;setSaving(false);onSave();
   };
   const cats=categories.filter(c=>c.type===type||type==='transfer');
@@ -591,7 +598,18 @@ function Transacciones(){
   const income=txns.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
   const expense=txns.filter(t=>t.type==='expense').reduce((s,t)=>s+Number(t.amount),0);
 
-  const del=async id=>{if(!window.confirm('¿Eliminar?'))return;await sb.from('transactions').delete().eq('id',id);load();};
+  const del=async id=>{
+    if(!window.confirm('¿Eliminar?'))return;
+    // Revertir el saldo antes de eliminar
+    const {data:tx}=await sb.from('transactions').select('amount,type,account_id').eq('id',id).single();
+    if(tx&&(tx.type==='expense'||tx.type==='income')){
+      const {data:acc}=await sb.from('accounts').select('balance').eq('id',tx.account_id).single();
+      const delta=tx.type==='income'?-Number(tx.amount):Number(tx.amount);
+      await sb.from('accounts').update({balance:Number(acc.balance)+delta}).eq('id',tx.account_id);
+    }
+    await sb.from('transactions').delete().eq('id',id);
+    load();
+  };
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:16}}>
