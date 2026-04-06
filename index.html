@@ -366,12 +366,25 @@ function Dashboard(){
       </div>
 
       {/* 4 Stat Cards */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
-        <StatCard label="Balance total" value={`$${bi}`} cents={bd} trend="12.1%" trendUp/>
-        <StatCard label="Ingresos del mes" value={`$${ii}`} cents={id} trend="6.3%" trendUp/>
-        <StatCard label="Gastos del mes" value={`$${ei}`} cents={ed} trend="2.4%" trendUp={false}/>
-        <StatCard label="Ahorros totales" value={`$${si}`} cents={sd} trend="12.1%" trendUp/>
-      </div>
+      {(()=>{
+        // Calcular mes anterior para comparar
+        const lastMonth=new Date();lastMonth.setMonth(lastMonth.getMonth()-1);
+        const lastKey=lastMonth.toISOString().slice(0,7);
+        const lastInc=txns.filter(t=>t.date?.startsWith(lastKey)&&t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
+        const lastExp=txns.filter(t=>t.date?.startsWith(lastKey)&&t.type==='expense').reduce((s,t)=>s+Number(t.amount),0);
+        const incDiff=lastInc>0?((income-lastInc)/lastInc*100):null;
+        const expDiff=lastExp>0?((expenses-lastExp)/lastExp*100):null;
+        return(
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
+            <StatCard label="Balance total" value={`$${bi}`} cents={bd}/>
+            <StatCard label="Ingresos del mes" value={`$${ii}`} cents={id}
+              trend={incDiff!==null?`${Math.abs(incDiff).toFixed(1)}%`:null} trendUp={incDiff>=0}/>
+            <StatCard label="Gastos del mes" value={`$${ei}`} cents={ed}
+              trend={expDiff!==null?`${Math.abs(expDiff).toFixed(1)}%`:null} trendUp={expDiff<0}/>
+            <StatCard label="Ahorros totales" value={`$${si}`} cents={sd}/>
+          </div>
+        );
+      })()}
 
       {/* Charts row */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 320px',gap:12}}>
@@ -1445,9 +1458,9 @@ function Analytics(){
 
       {/* KPIs */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
-        <StatCard label="Ingresos período" value={`$${money(totalInc,2).split(',')[0]}`} cents={money(totalInc,2).split(',')[1]||'00'} trendUp/>
-        <StatCard label="Gastos período" value={`$${money(totalExp,2).split(',')[0]}`} cents={money(totalExp,2).split(',')[1]||'00'} trendUp={false}/>
-        <StatCard label="Ahorro neto" value={`$${money(totalNet,2).split(',')[0]}`} cents={money(totalNet,2).split(',')[1]||'00'} trendUp={totalNet>=0}/>
+        <StatCard label="Ingresos período" value={`$${money(totalInc,2).split(',')[0]}`} cents={money(totalInc,2).split(',')[1]||'00'}/>
+        <StatCard label="Gastos período" value={`$${money(totalExp,2).split(',')[0]}`} cents={money(totalExp,2).split(',')[1]||'00'}/>
+        <StatCard label="Ahorro neto" value={`${totalNet>=0?'':'-'}$${money(Math.abs(totalNet),2).split(',')[0]}`} cents={money(Math.abs(totalNet),2).split(',')[1]||'00'} trendUp={totalNet>=0}/>
         <StatCard label={mode==='month'?'Total gastos mes':'Gasto promedio/mes'} value={`$${money(avgExp,2).split(',')[0]}`} cents={money(avgExp,2).split(',')[1]||'00'}/>
       </div>
 
