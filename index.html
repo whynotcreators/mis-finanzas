@@ -309,6 +309,7 @@ function Dashboard(){
   const [txns,setTxns]=useState([]);
   const [accs,setAccs]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [selectedMonth,setSelectedMonth]=useState(new Date().toISOString().slice(0,7));
 
   useEffect(()=>{
     (async()=>{
@@ -320,7 +321,7 @@ function Dashboard(){
     })();
   },[]);
 
-  const thisMonth=new Date().toISOString().slice(0,7);
+  const thisMonth=selectedMonth;
   const month=txns.filter(t=>t.date?.startsWith(thisMonth));
   const income=month.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
   const expenses=month.filter(t=>t.type==='expense').reduce((s,t)=>s+Number(t.amount),0);
@@ -361,14 +362,23 @@ function Dashboard(){
           <p style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Es el mejor momento para gestionar tus finanzas</p>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <Pill icon={Icons.calendar}>{new Date().toLocaleString('es',{month:'long',year:'numeric'})}</Pill>
+          <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:99,padding:'5px 10px'}}>
+            <button onClick={()=>{const d=new Date(selectedMonth+'-01');d.setMonth(d.getMonth()-1);setSelectedMonth(d.toISOString().slice(0,7));}}
+              style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:14,lineHeight:1,padding:'0 2px',display:'flex',alignItems:'center'}}>‹</button>
+            <span style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--text2)',fontWeight:500,minWidth:130,justifyContent:'center'}}>
+              {Icons.calendar}
+              {new Date(selectedMonth+'-01').toLocaleString('es',{month:'long',year:'numeric'})}
+            </span>
+            <button onClick={()=>{const d=new Date(selectedMonth+'-01');d.setMonth(d.getMonth()+1);setSelectedMonth(d.toISOString().slice(0,7));}}
+              style={{background:'none',border:'none',cursor:'pointer',color:'var(--text3)',fontSize:14,lineHeight:1,padding:'0 2px',display:'flex',alignItems:'center'}}>›</button>
+          </div>
         </div>
       </div>
 
       {/* 4 Stat Cards */}
       {(()=>{
         // Calcular mes anterior para comparar
-        const lastMonth=new Date();lastMonth.setMonth(lastMonth.getMonth()-1);
+        const lastMonth=new Date(selectedMonth+'-01');lastMonth.setMonth(lastMonth.getMonth()-1);
         const lastKey=lastMonth.toISOString().slice(0,7);
         const lastInc=txns.filter(t=>t.date?.startsWith(lastKey)&&t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
         const lastExp=txns.filter(t=>t.date?.startsWith(lastKey)&&t.type==='expense').reduce((s,t)=>s+Number(t.amount),0);
