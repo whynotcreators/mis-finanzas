@@ -57,7 +57,7 @@ table{border-collapse:collapse;width:100%;}
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useRef,useCallback} = React;
+const {useState,useEffect,useRef,useCallback,useMemo} = React;
 
 // ── CONFIG ──────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://bjmwzxkjrwuhponjwfhz.supabase.co';
@@ -77,13 +77,11 @@ function BarChart({data,keys,colors,height=140}){
   const max=Math.max(...data.flatMap(d=>keys.map(k=>d[k]||0)),1);
   return(
     <div style={{position:'relative'}}>
-      {/* Barras con HTML puro — sin SVG, sin distorsión */}
       <div style={{display:'flex',alignItems:'flex-end',height:height,gap:0}}>
         {data.map((d,i)=>(
           <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',height:'100%',position:'relative',cursor:'default'}}
             onMouseEnter={()=>{setHoverIdx(i);setTip({label:d.label,vals:keys.map((k,ki)=>({k,v:d[k]||0,c:colors[ki]}))});}}
             onMouseLeave={()=>{setHoverIdx(null);setTip(null);}}>
-            {/* Área de barras */}
             <div style={{flex:1,display:'flex',alignItems:'flex-end',gap:'2px',width:'100%',padding:'0 10%',
               background:hoverIdx===i?'rgba(132,112,255,0.06)':'transparent',borderRadius:4,transition:'background .15s'}}>
               {keys.map((k,ki)=>{
@@ -95,7 +93,6 @@ function BarChart({data,keys,colors,height=140}){
                 );
               })}
             </div>
-            {/* Label mes — fuera del SVG, nunca se distorsiona */}
             <div style={{fontSize:11,color:hoverIdx===i?'var(--primary)':'var(--text3)',marginTop:5,fontWeight:hoverIdx===i?600:400,
               textAlign:'center',width:'100%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',padding:'0 2px'}}>
               {d.label}
@@ -103,7 +100,6 @@ function BarChart({data,keys,colors,height=140}){
           </div>
         ))}
       </div>
-      {/* Tooltip */}
       {tip&&<div style={{position:'absolute',top:4,left:'50%',transform:'translateX(-50%)',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',fontSize:11,pointerEvents:'none',whiteSpace:'nowrap',boxShadow:'0 4px 16px rgba(0,0,0,0.15)',zIndex:10}}>
         <div style={{fontWeight:700,marginBottom:4,color:'var(--text)',fontSize:12}}>{tip.label}</div>
         {tip.vals.map(v=><div key={v.k} style={{color:v.c}}>${money(v.v,0)}</div>)}
@@ -111,16 +107,16 @@ function BarChart({data,keys,colors,height=140}){
     </div>
   );
 }
+
 function LineChart({data,dataKey,color='var(--primary)',height=48}){
   const vals=data.map(d=>d[dataKey]||0);
   const min=Math.min(...vals);
   const max=Math.max(...vals,min+0.01);
   const range=max-min||1;
-  // Normalizar: el min va al fondo, el max va arriba — funciona con negativos
   const toY=v=>height-4-((v-min)/range)*(height-8);
   const n=vals.length;
   const pts=vals.map((v,i)=>`${(i/Math.max(n-1,1))*100},${toY(v)}`).join(' ');
-  const zeroY=toY(0); // línea del cero
+  const zeroY=toY(0);
   return(
     <div style={{position:'relative',height}}>
       <svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="xMidYMid meet" style={{overflow:'visible'}}>
@@ -130,7 +126,6 @@ function LineChart({data,dataKey,color='var(--primary)',height=48}){
             <stop offset="100%" stopColor={color} stopOpacity="0"/>
           </linearGradient>
         </defs>
-        {/* Línea del cero si hay valores negativos */}
         {min<0&&<line x1="0" y1={zeroY} x2="100" y2={zeroY} stroke="var(--border)" strokeWidth="0.5" strokeDasharray="2,1"/>}
         <polygon points={`0,${height} ${pts} 100,${height}`} fill="url(#lg2)"/>
         <polyline points={pts} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round"/>
@@ -138,6 +133,7 @@ function LineChart({data,dataKey,color='var(--primary)',height=48}){
     </div>
   );
 }
+
 function DonutChart({data,colors,size=100}){
   const [tip,setTip]=useState(null);
   const total=data.reduce((s,d)=>s+(d.value||0),0)||1;
@@ -167,8 +163,114 @@ function DonutChart({data,colors,size=100}){
   );
 }
 
+// ── MULTI-LINE CHART para historial de saldos ──────────────────────────
+function MultiLineChart({series, labels, height=200}){
+  // series: [{name, color, values:[]}]
+  // labels: string[]
+  const [tip,setTip]=useState(null);
+  const [hoverX,setHoverX]=useState(null);
+
+  const allVals=series.flatMap(s=>s.values);
+  const minV=Math.min(...allVals,0);
+  const maxV=Math.max(...allVals,0.01);
+  const range=maxV-minV||1;
+  const padT=16, padB=24, padL=0, padR=0;
+  const chartH=height-padT-padB;
+  const n=labels.length;
+
+  const toX=i=>(n<=1?50:(i/(n-1))*100);
+  const toY=v=>padT+chartH-((v-minV)/range)*chartH;
+
+  const handleMouseMove=(e)=>{
+    const rect=e.currentTarget.getBoundingClientRect();
+    const xPct=((e.clientX-rect.left)/rect.width)*100;
+    const idx=Math.round((xPct/100)*(n-1));
+    const clamped=Math.max(0,Math.min(n-1,idx));
+    setHoverX(clamped);
+    setTip({idx:clamped,label:labels[clamped],vals:series.map(s=>({name:s.name,color:s.color,value:s.values[clamped]}))});
+  };
+
+  return(
+    <div style={{position:'relative',userSelect:'none'}}>
+      <svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="none"
+        style={{overflow:'visible',cursor:'crosshair'}}
+        onMouseMove={handleMouseMove} onMouseLeave={()=>{setHoverX(null);setTip(null);}}>
+        <defs>
+          {series.map((s,si)=>(
+            <linearGradient key={si} id={`mlg${si}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={s.color} stopOpacity="0.15"/>
+              <stop offset="100%" stopColor={s.color} stopOpacity="0"/>
+            </linearGradient>
+          ))}
+        </defs>
+        {/* Grid horizontals */}
+        {[0,0.25,0.5,0.75,1].map((t,i)=>{
+          const y=padT+chartH*t;
+          return<line key={i} x1="0" y1={y} x2="100" y2={y} stroke="var(--border)" strokeWidth="0.4" vectorEffect="non-scaling-stroke"/>;
+        })}
+        {/* Series */}
+        {series.map((s,si)=>{
+          const pts=s.values.map((v,i)=>`${toX(i)},${toY(v)}`).join(' ');
+          const areaPts=`0,${toY(minV)} `+s.values.map((v,i)=>`${toX(i)},${toY(v)}`).join(' ')+` 100,${toY(minV)}`;
+          return(
+            <g key={si}>
+              <polygon points={areaPts} fill={`url(#mlg${si})`}/>
+              <polyline points={pts} fill="none" stroke={s.color} strokeWidth="1.8"
+                strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+            </g>
+          );
+        })}
+        {/* Hover line */}
+        {hoverX!==null&&(
+          <line x1={toX(hoverX)} y1={padT} x2={toX(hoverX)} y2={padT+chartH}
+            stroke="var(--primary)" strokeWidth="0.8" strokeDasharray="2,1" vectorEffect="non-scaling-stroke"/>
+        )}
+        {/* Dots on hover */}
+        {hoverX!==null&&series.map((s,si)=>(
+          <circle key={si} cx={toX(hoverX)} cy={toY(s.values[hoverX]||0)} r="3"
+            fill={s.color} stroke="var(--surface)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
+        ))}
+      </svg>
+      {/* X labels */}
+      <div style={{display:'flex',justifyContent:'space-between',marginTop:4,paddingLeft:0}}>
+        {labels.map((l,i)=>(
+          <span key={i} style={{fontSize:10,color:hoverX===i?'var(--primary)':'var(--text3)',
+            fontWeight:hoverX===i?700:400,textAlign:'center',flex:1,
+            display:i===0||i===labels.length-1||(i%(Math.ceil(n/6))===0)?'block':'none'}}>
+            {l}
+          </span>
+        ))}
+      </div>
+      {/* Tooltip */}
+      {tip&&(
+        <div style={{
+          position:'absolute',top:0,
+          left:`${Math.min(Math.max((tip.idx/(n-1))*100,10),75)}%`,
+          background:'var(--surface)',border:'1px solid var(--border)',
+          borderRadius:10,padding:'10px 14px',fontSize:12,
+          pointerEvents:'none',whiteSpace:'nowrap',
+          boxShadow:'0 4px 20px rgba(0,0,0,0.15)',zIndex:20,
+          transform:'translateX(-50%)',
+        }}>
+          <div style={{fontWeight:700,color:'var(--text)',marginBottom:6,fontSize:12}}>{tip.label}</div>
+          {tip.vals.map((v,i)=>(
+            <div key={i} style={{display:'flex',justifyContent:'space-between',gap:16,marginBottom:2}}>
+              <span style={{color:v.color,display:'flex',alignItems:'center',gap:5}}>
+                <span style={{width:7,height:7,borderRadius:'50%',background:v.color,display:'inline-block'}}/>
+                {v.name}
+              </span>
+              <span style={{fontWeight:600,color:'var(--text)'}}>${money(v.value||0,0)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── DESIGN TOKENS ────────────────────────────────────────────────────────
 const CHART_COLORS=['#8470FF','#A498FF','#BFB7FF','#6657C6','#00b1ef','#297B32','#F9970C'];
+const ACC_LINE_COLORS=['#8470FF','#22c55e','#f97316','#06b6d4','#f43f5e','#a78bfa','#fbbf24'];
 const TYPE_COLORS={income:'#297B32',expense:'#EB3838',transfer:'#8470FF'};
 const TYPE_BG={income:'#E5FAE6',expense:'#FFEBEB',transfer:'#ECE9FF'};
 const TYPE_LABELS={income:'Ingreso',expense:'Gasto',transfer:'Transferencia'};
@@ -204,6 +306,7 @@ const Icons={
   chevron:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>,
   calendar:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>,
   widget:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>,
+  historial:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/><circle cx="22" cy="12" r="0"/></svg>,
 };
 
 // ── SHARED UI ────────────────────────────────────────────────────────────
@@ -310,7 +413,6 @@ function Dashboard(){
   const [accs,setAccs]=useState([]);
   const [loading,setLoading]=useState(true);
   const [selectedMonth,setSelectedMonth]=useState(new Date().toISOString().slice(0,7));
-
   const [budgets,setBudgets]=useState([]);
 
   useEffect(()=>{
@@ -358,7 +460,6 @@ function Dashboard(){
   if(loading)return<Loading/>;
   return(
     <div style={{display:'flex',flexDirection:'column',gap:16}}>
-      {/* Header */}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
         <div>
           <h1 style={{fontSize:22,fontWeight:700,color:'var(--text)',letterSpacing:'-0.3px'}}>Panel financiero</h1>
@@ -378,9 +479,7 @@ function Dashboard(){
         </div>
       </div>
 
-      {/* 4 Stat Cards */}
       {(()=>{
-        // Calcular mes anterior para comparar
         const lastMonth=new Date(selectedMonth+'-01');lastMonth.setMonth(lastMonth.getMonth()-1);
         const lastKey=lastMonth.toISOString().slice(0,7);
         const lastInc=txns.filter(t=>t.date?.startsWith(lastKey)&&t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
@@ -399,108 +498,66 @@ function Dashboard(){
         );
       })()}
 
-      {/* ── ALERTAS DE PRESUPUESTO ─────────────────────────────────── */}
       {(()=>{
-        // Traer presupuestos del mes actual y comparar con gastos reales
-        const alerts = [];
-
-        // Necesitamos los presupuestos — los buscamos en el useEffect
-        // Los calculamos desde las transacciones del mes vs presupuestos cargados
-        if(budgets && budgets.length > 0){
-          budgets.forEach(b => {
-            const spent = month.filter(t => t.category_id === b.category_id && t.type === 'expense')
-              .reduce((s,t) => s + Number(t.amount), 0);
-            const pct = b.amount_planned > 0 ? (spent / b.amount_planned) * 100 : 0;
-            if(pct >= 100) alerts.push({ name: b.categories?.name, spent, planned: b.amount_planned, pct, level: 'exceeded' });
-            else if(pct >= 80) alerts.push({ name: b.categories?.name, spent, planned: b.amount_planned, pct, level: 'warning' });
+        const alerts=[];
+        if(budgets&&budgets.length>0){
+          budgets.forEach(b=>{
+            const spent=month.filter(t=>t.category_id===b.category_id&&t.type==='expense').reduce((s,t)=>s+Number(t.amount),0);
+            const pct=b.amount_planned>0?(spent/b.amount_planned)*100:0;
+            if(pct>=100)alerts.push({name:b.categories?.name,spent,planned:b.amount_planned,pct,level:'exceeded'});
+            else if(pct>=80)alerts.push({name:b.categories?.name,spent,planned:b.amount_planned,pct,level:'warning'});
           });
         }
-        if(alerts.length === 0) return null;
+        if(alerts.length===0)return null;
         return(
           <div style={{display:'flex',flexDirection:'column',gap:8}}>
             {alerts.map((a,i)=>(
-              <div key={i} style={{
-                borderRadius:12, padding:'12px 16px',
-                background: a.level==='exceeded' ? 'var(--danger-bg)' : 'var(--warning-bg)',
-                border: `1px solid ${a.level==='exceeded' ? '#fecaca' : '#fde68a'}`,
-                display:'flex', alignItems:'center', gap:12
-              }}>
+              <div key={i} style={{borderRadius:12,padding:'12px 16px',background:a.level==='exceeded'?'var(--danger-bg)':'var(--warning-bg)',border:`1px solid ${a.level==='exceeded'?'#fecaca':'#fde68a'}`,display:'flex',alignItems:'center',gap:12}}>
                 <span style={{fontSize:18,flexShrink:0}}>{a.level==='exceeded'?'🔴':'🟡'}</span>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:600,color:'var(--text)'}}>
-                    {a.level==='exceeded'
-                      ? `Superaste el presupuesto de ${a.name}`
-                      : `Llegaste al ${a.pct.toFixed(0)}% del presupuesto de ${a.name}`}
+                    {a.level==='exceeded'?`Superaste el presupuesto de ${a.name}`:`Llegaste al ${a.pct.toFixed(0)}% del presupuesto de ${a.name}`}
                   </div>
                   <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>
                     Gastaste <strong>${money(a.spent,0)}</strong> de <strong>${money(a.planned,0)}</strong> planificados
-                    {a.level==='exceeded' && ` — superaste por $${money(a.spent-a.planned,0)}`}
+                    {a.level==='exceeded'&&` — superaste por $${money(a.spent-a.planned,0)}`}
                   </div>
                 </div>
-                <div style={{
-                  fontSize:13,fontWeight:800,
-                  color: a.level==='exceeded'?'var(--danger)':'var(--warning)',
-                  flexShrink:0
-                }}>{a.pct.toFixed(0)}%</div>
+                <div style={{fontSize:13,fontWeight:800,color:a.level==='exceeded'?'var(--danger)':'var(--warning)',flexShrink:0}}>{a.pct.toFixed(0)}%</div>
               </div>
             ))}
           </div>
         );
       })()}
 
-      {/* ── PROYECCIÓN DE FLUJO DE CAJA ──────────────────────────── */}
       {(()=>{
-        const today = new Date();
-        const dayOfMonth = today.getDate();
-        const daysInMonth = new Date(today.getFullYear(), today.getMonth()+1, 0).getDate();
-        const daysLeft = daysInMonth - dayOfMonth;
-        const pctMonthElapsed = (dayOfMonth / daysInMonth) * 100;
-
-        // Solo mostrar si estamos en el mes actual
-        const currentMonth = today.toISOString().slice(0,7);
-        if(selectedMonth !== currentMonth) return null;
-        if(month.length === 0 && income === 0) return null;
-
-        // Gastos fijos del mes (alquiler, servicios, subs) — categorizados como fijos
-        const fixedCats = ['Alquiler','Servicios'];
-        const fixedExp = month.filter(t => t.type==='expense' && fixedCats.includes(t.categories?.name))
-          .reduce((s,t) => s+Number(t.amount), 0);
-
-        // Gastos variables (todo lo demás)
-        const varExp = expenses - fixedExp;
-
-        // Promedio diario de gastos variables
-        const avgVarPerDay = dayOfMonth > 0 ? varExp / dayOfMonth : 0;
-
-        // Proyección gastos variables restantes
-        const projectedVarExp = avgVarPerDay * daysLeft;
-
-        // Presupuestos fijos que faltan pagar (si aún no se registraron)
-        const fixedBudgetTotal = budgets
-          .filter(b => fixedCats.includes(b.categories?.name))
-          .reduce((s,b) => s+Number(b.amount_planned), 0);
-        const fixedPending = Math.max(fixedBudgetTotal - fixedExp, 0);
-
-        // Total proyectado de gastos al fin de mes
-        const totalProjectedExp = expenses + projectedVarExp + fixedPending;
-
-        // Flujo neto proyectado
-        const projectedNet = income - totalProjectedExp;
-
-        // Balance proyectado al fin de mes (balance actual + ingresos pendientes - gastos pendientes)
-        const currentBalance = accs.filter(a=>a.currency==='USD').reduce((s,a)=>s+Number(a.balance),0);
-        const projectedBalance = currentBalance - projectedVarExp - fixedPending;
-
-        const isGood = projectedNet >= 0 || projectedBalance > 0;
-
+        const today=new Date();
+        const dayOfMonth=today.getDate();
+        const daysInMonth=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+        const daysLeft=daysInMonth-dayOfMonth;
+        const pctMonthElapsed=(dayOfMonth/daysInMonth)*100;
+        const currentMonth=today.toISOString().slice(0,7);
+        if(selectedMonth!==currentMonth)return null;
+        if(month.length===0&&income===0)return null;
+        const fixedCats=['Alquiler','Servicios'];
+        const fixedExp=month.filter(t=>t.type==='expense'&&fixedCats.includes(t.categories?.name)).reduce((s,t)=>s+Number(t.amount),0);
+        const varExp=expenses-fixedExp;
+        const avgVarPerDay=dayOfMonth>0?varExp/dayOfMonth:0;
+        const projectedVarExp=avgVarPerDay*daysLeft;
+        const fixedBudgetTotal=budgets.filter(b=>fixedCats.includes(b.categories?.name)).reduce((s,b)=>s+Number(b.amount_planned),0);
+        const fixedPending=Math.max(fixedBudgetTotal-fixedExp,0);
+        const totalProjectedExp=expenses+projectedVarExp+fixedPending;
+        const projectedNet=income-totalProjectedExp;
+        const currentBalance=accs.filter(a=>a.currency==='USD').reduce((s,a)=>s+Number(a.balance),0);
+        const projectedBalance=currentBalance-projectedVarExp-fixedPending;
+        const isGood=projectedNet>=0||projectedBalance>0;
         return(
-          <Card style={{background: isGood ? 'var(--surface)' : 'var(--danger-bg)', border: isGood ? '1px solid var(--border)' : '1px solid #fecaca'}}>
+          <Card style={{background:isGood?'var(--surface)':'var(--danger-bg)',border:isGood?'1px solid var(--border)':'1px solid #fecaca'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
               <div>
                 <div style={{fontWeight:600,fontSize:14,color:'var(--text)'}}>📊 Proyección de flujo de caja</div>
                 <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>Día {dayOfMonth} de {daysInMonth} — quedan {daysLeft} días</div>
               </div>
-              {/* Barra de progreso del mes */}
               <div style={{width:140}}>
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--text3)',marginBottom:3}}>
                   <span>Inicio</span><span style={{color:'var(--primary)',fontWeight:600}}>Hoy {pctMonthElapsed.toFixed(0)}%</span><span>Fin</span>
@@ -510,76 +567,47 @@ function Dashboard(){
                 </div>
               </div>
             </div>
-
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
-              {/* Gastos hasta hoy */}
               <div style={{background:'var(--surface2)',borderRadius:10,padding:'10px 14px'}}>
                 <div style={{fontSize:10,color:'var(--text3)',marginBottom:4}}>Gastado hasta hoy</div>
                 <div style={{fontSize:18,fontWeight:700,color:'var(--danger)'}}>${money(expenses,0)}</div>
                 <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>{pctMonthElapsed.toFixed(0)}% del mes</div>
               </div>
-
-              {/* Proyección gastos variables restantes */}
               <div style={{background:'var(--surface2)',borderRadius:10,padding:'10px 14px'}}>
                 <div style={{fontSize:10,color:'var(--text3)',marginBottom:4}}>Gastos variables est.</div>
                 <div style={{fontSize:18,fontWeight:700,color:'var(--warning)'}}>${money(projectedVarExp,0)}</div>
                 <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>${money(avgVarPerDay,0)}/día × {daysLeft} días</div>
               </div>
-
-              {/* Gastos fijos pendientes */}
               <div style={{background:'var(--surface2)',borderRadius:10,padding:'10px 14px'}}>
                 <div style={{fontSize:10,color:'var(--text3)',marginBottom:4}}>Gastos fijos pendientes</div>
                 <div style={{fontSize:18,fontWeight:700,color:fixedPending>0?'var(--danger)':'var(--success)'}}>${money(fixedPending,0)}</div>
                 <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>{fixedPending>0?'Alquiler/servicios':'Todo pagado ✓'}</div>
               </div>
-
-              {/* Balance proyectado fin de mes */}
               <div style={{background:projectedBalance>=0?'var(--success-bg)':'var(--danger-bg)',borderRadius:10,padding:'10px 14px',border:`1px solid ${projectedBalance>=0?'#bbf7d0':'#fecaca'}`}}>
                 <div style={{fontSize:10,color:'var(--text3)',marginBottom:4}}>Balance estimado fin de mes</div>
                 <div style={{fontSize:18,fontWeight:700,color:projectedBalance>=0?'var(--success)':'var(--danger)'}}>${money(projectedBalance,0)}</div>
-                <div style={{fontSize:10,color:projectedBalance>=0?'var(--success)':'var(--danger)',marginTop:2}}>
-                  {projectedBalance>=0?'✓ Vas bien':'⚠ Revisá tus gastos'}
-                </div>
+                <div style={{fontSize:10,color:projectedBalance>=0?'var(--success)':'var(--danger)',marginTop:2}}>{projectedBalance>=0?'✓ Vas bien':'⚠ Revisá tus gastos'}</div>
               </div>
             </div>
-
-            {/* Evaluación vs meta de ahorro y presupuesto */}
             {(()=>{
-              // Cuánto necesita ahorrar este mes para cumplir la meta
-              // (lo calculamos si hay ingresos, sino mostramos solo ritmo de gastos)
-              const totalBudget = budgets.reduce((s,b) => s+Number(b.amount_planned), 0);
-              const projectedOverBudget = totalProjectedExp > totalBudget && totalBudget > 0;
-              const msgs = [];
-
-              // Mensaje sobre ritmo de gastos vs presupuesto total
-              if(totalBudget > 0){
-                const budgetUsedPct = (totalProjectedExp / totalBudget) * 100;
-                if(budgetUsedPct > 110) msgs.push({ icon:'🔴', txt:`A este ritmo vas a gastar $${money(totalProjectedExp,0)} — un ${(budgetUsedPct-100).toFixed(0)}% más que tu presupuesto total de $${money(totalBudget,0)}.` });
-                else if(budgetUsedPct > 90) msgs.push({ icon:'🟡', txt:`Proyección ajustada: $${money(totalProjectedExp,0)} vs presupuesto $${money(totalBudget,0)}. Margen muy pequeño.` });
-                else msgs.push({ icon:'✅', txt:`Proyección de gastos $${money(totalProjectedExp,0)} dentro del presupuesto de $${money(totalBudget,0)}.` });
+              const totalBudget=budgets.reduce((s,b)=>s+Number(b.amount_planned),0);
+              const msgs=[];
+              if(totalBudget>0){
+                const budgetUsedPct=(totalProjectedExp/totalBudget)*100;
+                if(budgetUsedPct>110)msgs.push({icon:'🔴',txt:`A este ritmo vas a gastar $${money(totalProjectedExp,0)} — un ${(budgetUsedPct-100).toFixed(0)}% más que tu presupuesto total de $${money(totalBudget,0)}.`});
+                else if(budgetUsedPct>90)msgs.push({icon:'🟡',txt:`Proyección ajustada: $${money(totalProjectedExp,0)} vs presupuesto $${money(totalBudget,0)}. Margen muy pequeño.`});
+                else msgs.push({icon:'✅',txt:`Proyección de gastos $${money(totalProjectedExp,0)} dentro del presupuesto de $${money(totalBudget,0)}.`});
               }
-
-              // Mensaje sobre meta de ahorro (solo si hay ingresos)
-              if(income > 0){
-                const netAfterProjected = income - totalProjectedExp;
-                msgs.push({ icon: netAfterProjected >= 0 ? '💰' : '⚠️',
-                  txt: netAfterProjected >= 0
-                    ? `Con tus ingresos actuales ($${money(income,0)}) y gastos proyectados ($${money(totalProjectedExp,0)}), podrías ahorrar ~$${money(netAfterProjected,0)} este mes.`
-                    : `Tus gastos proyectados ($${money(totalProjectedExp,0)}) superan tus ingresos registrados ($${money(income,0)}). Revisá tu ritmo.`
-                });
-              } else {
-                msgs.push({ icon:'ℹ️', txt:`Registrá tus ingresos para ver si vas a poder cumplir tu meta de ahorro este mes.` });
+              if(income>0){
+                const netAfterProjected=income-totalProjectedExp;
+                msgs.push({icon:netAfterProjected>=0?'💰':'⚠️',txt:netAfterProjected>=0?`Con tus ingresos actuales ($${money(income,0)}) y gastos proyectados ($${money(totalProjectedExp,0)}), podrías ahorrar ~$${money(netAfterProjected,0)} este mes.`:`Tus gastos proyectados ($${money(totalProjectedExp,0)}) superan tus ingresos registrados ($${money(income,0)}). Revisá tu ritmo.`});
               }
-
-              // Ritmo diario
-              if(avgVarPerDay > 0) msgs.push({ icon:'📌', txt:`Ritmo actual: $${money(avgVarPerDay,0)}/día en gastos variables.` });
-
+              if(avgVarPerDay>0)msgs.push({icon:'📌',txt:`Ritmo actual: $${money(avgVarPerDay,0)}/día en gastos variables.`});
               return(
                 <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:5}}>
                   {msgs.map((m,i)=>(
                     <div key={i} style={{fontSize:12,color:'var(--text2)',background:'var(--surface2)',borderRadius:8,padding:'7px 12px',lineHeight:1.5,display:'flex',gap:7,alignItems:'flex-start'}}>
-                      <span style={{flexShrink:0}}>{m.icon}</span>
-                      <span>{m.txt}</span>
+                      <span style={{flexShrink:0}}>{m.icon}</span><span>{m.txt}</span>
                     </div>
                   ))}
                 </div>
@@ -589,7 +617,6 @@ function Dashboard(){
         );
       })()}
 
-      {/* Charts row */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 320px',gap:12}}>
         <Card>
           <CardHeader title="Flujo de dinero" action={
@@ -627,7 +654,6 @@ function Dashboard(){
         </Card>
       </div>
 
-      {/* Bottom row */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 320px',gap:12}}>
         <Card style={{padding:0,overflow:'hidden'}}>
           <div style={{padding:'16px 18px 12px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -722,7 +748,6 @@ function TxModal({accounts,categories,onClose,onSave}){
     ref.current=true;setSaving(true);
     const amt=parseFloat(amount);
     await sb.from('transactions').insert({account_id:accountId,category_id:categoryId||null,amount:amt,type,date,description:desc,payment_method:method,is_recurring:recurring,is_impulsive:impulsive});
-    // Actualizar saldo de la cuenta automáticamente
     if(type==='expense'||type==='income'){
       const {data:acc}=await sb.from('accounts').select('balance').eq('id',accountId).single();
       const delta=type==='income'?amt:-amt;
@@ -791,7 +816,6 @@ function Transacciones(){
 
   const del=async id=>{
     if(!window.confirm('¿Eliminar?'))return;
-    // Revertir el saldo antes de eliminar
     const {data:tx}=await sb.from('transactions').select('amount,type,account_id').eq('id',id).single();
     if(tx&&(tx.type==='expense'||tx.type==='income')){
       const {data:acc}=await sb.from('accounts').select('balance').eq('id',tx.account_id).single();
@@ -1407,9 +1431,214 @@ function Configuracion(){
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// HISTORIAL DE SALDOS POR CUENTA (nueva sección)
+// ══════════════════════════════════════════════════════════════════════════
+function Historial(){
+  const [accounts,setAccounts]=useState([]);
+  const [txns,setTxns]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [selectedAccounts,setSelectedAccounts]=useState([]);
+  const [period,setPeriod]=useState('6m');
 
+  useEffect(()=>{
+    (async()=>{
+      const [a,t]=await Promise.all([
+        sb.from('accounts').select('*').eq('is_active',true).order('created_at'),
+        sb.from('transactions').select('*').order('date',{ascending:true}),
+      ]);
+      const accs=a.data||[];
+      setAccounts(accs);
+      setSelectedAccounts(accs.map(a=>a.id)); // todas seleccionadas por defecto
+      setTxns(t.data||[]);
+      setLoading(false);
+    })();
+  },[]);
 
-// Gráfico principal de Analytics: barras agrupadas + línea de tendencia
+  // Generar puntos de tiempo según período
+  const getDatePoints=()=>{
+    const n={'3m':12,'6m':24,'12m':24,'all':36}[period]||24;
+    const monthCount={'3m':3,'6m':6,'12m':12,'all':24}[period]||6;
+    const points=[];
+    const today=new Date();
+    for(let i=monthCount;i>=0;i--){
+      const d=new Date(today.getFullYear(),today.getMonth()-i,1);
+      points.push({
+        date:d,
+        key:d.toISOString().slice(0,7),
+        label:d.toLocaleString('es',{month:'short',year:i>11?'2-digit':undefined}),
+      });
+    }
+    return points;
+  };
+
+  const datePoints=useMemo(()=>getDatePoints(),[period]);
+
+  // Para cada cuenta, reconstruir el saldo en cada punto de tiempo
+  // Lógica: saldo actual - suma de transacciones POSTERIORES a ese punto
+  const buildHistory=useMemo(()=>{
+    return accounts.map((acc,ai)=>{
+      const accTxns=txns.filter(t=>t.account_id===acc.id);
+      const currentBalance=Number(acc.balance);
+
+      // Reconstruir hacia atrás desde el saldo actual
+      const values=datePoints.map(point=>{
+        // Transacciones posteriores al primer día de ese mes
+        const pointDate=point.key+'-01';
+        const futureTxns=accTxns.filter(t=>t.date>=pointDate);
+
+        // Deshacer las futuras para obtener el saldo en ese punto
+        let balanceAtPoint=currentBalance;
+        futureTxns.forEach(t=>{
+          if(t.type==='income') balanceAtPoint-=Number(t.amount);
+          else if(t.type==='expense') balanceAtPoint+=Number(t.amount);
+        });
+        return Math.max(balanceAtPoint,0); // evitar negativos extremos si faltan datos
+      });
+
+      return{
+        id:acc.id,
+        name:acc.name,
+        currency:acc.currency,
+        color:ACC_LINE_COLORS[ai%ACC_LINE_COLORS.length],
+        values,
+        currentBalance,
+      };
+    });
+  },[accounts,txns,datePoints]);
+
+  const visibleSeries=buildHistory.filter(s=>selectedAccounts.includes(s.id));
+  const labels=datePoints.map(p=>p.label);
+
+  // Stats: mayor crecimiento, mayor caída, cuenta con más saldo
+  const stats=useMemo(()=>{
+    if(!buildHistory.length||!datePoints.length)return null;
+    return buildHistory.map(s=>{
+      const first=s.values[0]||0;
+      const last=s.values[s.values.length-1]||s.currentBalance;
+      const change=last-first;
+      const changePct=first>0?(change/first)*100:0;
+      const maxVal=Math.max(...s.values);
+      const minVal=Math.min(...s.values);
+      return{...s,change,changePct,maxVal,minVal};
+    });
+  },[buildHistory,datePoints]);
+
+  const toggleAccount=(id)=>{
+    setSelectedAccounts(prev=>
+      prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]
+    );
+  };
+
+  if(loading)return<Loading/>;
+  if(!accounts.length)return<Card><Empty msg="No tenés cuentas activas"/></Card>;
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Header */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
+        <div>
+          <h1 style={{fontSize:20,fontWeight:700,letterSpacing:'-0.3px'}}>Historial de saldos</h1>
+          <p style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Evolución del balance de cada cuenta en el tiempo</p>
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          {[['3m','3 meses'],['6m','6 meses'],['12m','12 meses'],['all','Todo']].map(([v,l])=>(
+            <Pill key={v} onClick={()=>setPeriod(v)} active={period===v}>{l}</Pill>
+          ))}
+        </div>
+      </div>
+
+      {/* Selector de cuentas */}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        {accounts.map((acc,i)=>(
+          <button key={acc.id} onClick={()=>toggleAccount(acc.id)} style={{
+            display:'inline-flex',alignItems:'center',gap:7,padding:'6px 14px',
+            borderRadius:99,border:`1.5px solid ${selectedAccounts.includes(acc.id)?ACC_LINE_COLORS[i%ACC_LINE_COLORS.length]:'var(--border)'}`,
+            background:selectedAccounts.includes(acc.id)?`${ACC_LINE_COLORS[i%ACC_LINE_COLORS.length]}18`:'var(--surface)',
+            color:selectedAccounts.includes(acc.id)?ACC_LINE_COLORS[i%ACC_LINE_COLORS.length]:'var(--text3)',
+            fontSize:12,fontWeight:500,cursor:'pointer',transition:'all .15s',
+          }}>
+            <span style={{width:8,height:8,borderRadius:'50%',background:ACC_LINE_COLORS[i%ACC_LINE_COLORS.length],opacity:selectedAccounts.includes(acc.id)?1:0.3}}/>
+            {acc.name}
+            <span style={{fontSize:11,opacity:0.7}}>{acc.currency}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Gráfico principal multi-línea */}
+      <Card>
+        <CardHeader title="Evolución de saldos"/>
+        {visibleSeries.length===0?
+          <Empty msg="Seleccioná al menos una cuenta"/>:
+          <MultiLineChart series={visibleSeries} labels={labels} height={240}/>
+        }
+        {/* Leyenda */}
+        <div style={{display:'flex',gap:16,flexWrap:'wrap',marginTop:16,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+          {visibleSeries.map(s=>(
+            <div key={s.id} style={{display:'flex',alignItems:'center',gap:6}}>
+              <div style={{width:20,height:3,borderRadius:2,background:s.color}}/>
+              <span style={{fontSize:12,color:'var(--text2)'}}>{s.name}</span>
+              <span style={{fontSize:12,fontWeight:600,color:'var(--text)'}}>${money(s.currentBalance,0)}</span>
+              <span style={{fontSize:10,color:'var(--text3)'}}>{s.currency}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Stats cards por cuenta */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:12}}>
+        {stats?.filter(s=>selectedAccounts.includes(s.id)).map((s,i)=>{
+          const isUp=s.change>=0;
+          return(
+            <Card key={s.id} style={{borderTop:`3px solid ${s.color}`}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
+                <div>
+                  <div style={{fontWeight:600,fontSize:14,color:'var(--text)'}}>{s.name}</div>
+                  <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{s.currency}</div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:18,fontWeight:700,color:'var(--text)'}}>${money(s.currentBalance,0)}</div>
+                  <div style={{fontSize:11,fontWeight:600,color:isUp?'var(--success)':'var(--danger)',background:isUp?'var(--success-bg)':'var(--danger-bg)',borderRadius:99,padding:'2px 8px',marginTop:2,display:'inline-block'}}>
+                    {isUp?'↑':'↓'} {Math.abs(s.changePct).toFixed(1)}% en el período
+                  </div>
+                </div>
+              </div>
+              {/* Mini sparkline */}
+              <div style={{height:40,marginBottom:10}}>
+                <LineChart data={s.values.map((v,i)=>({v}))} dataKey="v" color={s.color} height={40}/>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+                <div style={{background:'var(--surface2)',borderRadius:8,padding:'7px 10px',textAlign:'center'}}>
+                  <div style={{fontSize:10,color:'var(--text3)',marginBottom:2}}>Mínimo</div>
+                  <div style={{fontSize:13,fontWeight:600,color:'var(--danger)'}}>${money(s.minVal,0)}</div>
+                </div>
+                <div style={{background:'var(--surface2)',borderRadius:8,padding:'7px 10px',textAlign:'center'}}>
+                  <div style={{fontSize:10,color:'var(--text3)',marginBottom:2}}>Máximo</div>
+                  <div style={{fontSize:13,fontWeight:600,color:'var(--success)'}}>${money(s.maxVal,0)}</div>
+                </div>
+                <div style={{background:'var(--surface2)',borderRadius:8,padding:'7px 10px',textAlign:'center'}}>
+                  <div style={{fontSize:10,color:'var(--text3)',marginBottom:2}}>Variación</div>
+                  <div style={{fontSize:13,fontWeight:600,color:isUp?'var(--success)':'var(--danger)'}}>
+                    {isUp?'+':''}{money(s.change,0)}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Nota metodológica */}
+      <div style={{fontSize:11,color:'var(--text3)',padding:'10px 16px',background:'var(--surface2)',borderRadius:10,lineHeight:1.5}}>
+        ℹ️ El historial se calcula hacia atrás desde el saldo actual usando tus transacciones registradas. Si hay transacciones faltantes, los valores históricos pueden ser aproximados.
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ANALYTICS (con comparativa mes a mes agregada)
+// ══════════════════════════════════════════════════════════════════════════
 function AnalyticsChart({data}){
   const [tooltip,setTooltip]=useState(null);
   const [hoverIdx,setHoverIdx]=useState(null);
@@ -1422,19 +1651,8 @@ function AnalyticsChart({data}){
 
   const maxVal=Math.max(...data.flatMap(d=>[d.income,d.expenses]),1);
   const chartH=220;
-  const barGroupW=100/data.length;
-  const barW=barGroupW*0.32;
 
-  // Puntos de la línea de neto
-  const netPts=data.map((d,i)=>{
-    const x=i*barGroupW+barGroupW/2;
-    const y=chartH-Math.max(((d.net)/maxVal)*chartH,0);
-    return`${x},${Math.max(y,2)}`;
-  }).join(' ');
-
-  // Ticks del eje Y
-  const yTicks=4;
-  const tickVals=Array.from({length:yTicks+1},(_,i)=>(maxVal/yTicks)*i);
+  const tickVals=[0,0.25,0.5,0.75,1].map(t=>maxVal*t);
 
   return(
     <div style={{position:'relative',userSelect:'none'}}>
@@ -1451,7 +1669,6 @@ function AnalyticsChart({data}){
       </div>
 
       <div style={{display:'flex',gap:0,paddingBottom:4}}>
-        {/* Eje Y */}
         <div style={{display:'flex',flexDirection:'column-reverse',justifyContent:'space-between',height:chartH,paddingBottom:2,marginRight:8,flexShrink:0}}>
           {tickVals.map((v,i)=>(
             <span key={i} style={{fontSize:10,color:'var(--text3)',whiteSpace:'nowrap',lineHeight:1}}>
@@ -1460,16 +1677,12 @@ function AnalyticsChart({data}){
           ))}
         </div>
 
-        {/* Área del gráfico — barras con HTML puro, sin SVG distorsionado */}
         <div style={{flex:1,position:'relative'}}>
-          {/* Grid lines + barras en HTML */}
           <div style={{position:'relative',height:chartH,marginBottom:28}}>
-            {/* Grid lines horizontales */}
             {tickVals.map((v,i)=>{
               const pct=((v/maxVal)*100);
               return<div key={i} style={{position:'absolute',bottom:`${pct}%`,left:0,right:0,height:1,background:'var(--border)',opacity:0.5}}/>;
             })}
-            {/* Barras agrupadas */}
             <div style={{display:'flex',height:'100%',alignItems:'flex-end',gap:0}}>
               {data.map((d,i)=>{
                 const incPct=((d.income||0)/maxVal)*100;
@@ -1481,27 +1694,17 @@ function AnalyticsChart({data}){
                     onMouseEnter={()=>{setHoverIdx(i);setTooltip({...d,idx:i});}}
                     onMouseLeave={()=>{setHoverIdx(null);setTooltip(null);}}>
                     <div style={{display:'flex',alignItems:'flex-end',gap:'3px',width:'60%',height:'100%',justifyContent:'center',paddingBottom:0}}>
-                      {/* Barra ingresos */}
                       <div style={{flex:1,height:`${Math.max(incPct,0.2)}%`,background:isHover?'#6d5de0':'#8470FF',borderRadius:'3px 3px 0 0',transition:'height .4s,background .15s',minHeight:incPct>0?2:0}}/>
-                      {/* Barra gastos */}
                       <div style={{flex:1,height:`${Math.max(expPct,0.2)}%`,background:isHover?'#c4b5fd':'#BFB7FF',borderRadius:'3px 3px 0 0',transition:'height .4s,background .15s',minHeight:expPct>0?2:0}}/>
                     </div>
                   </div>
                 );
               })}
             </div>
-            {/* Línea de neto — SVG overlay encima solo para la línea, con viewBox real */}
             {data.some(d=>d.net!==0)&&(
               <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',overflow:'visible',pointerEvents:'none'}}>
-                <defs>
-                  <linearGradient id="netGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#22c55e" stopOpacity="0.15"/>
-                    <stop offset="100%" stopColor="#22c55e" stopOpacity="0"/>
-                  </linearGradient>
-                </defs>
                 {(()=>{
                   const W=100/data.length;
-                  const netP=data.map((d,i)=>`${(i*W+W/2)}%,${100-Math.max(((d.net)/maxVal)*100,0)}%`).join(' ');
                   const polyPts=data.map((d,i)=>{
                     const x=(i*W+W/2);
                     const y=100-Math.max(((d.net)/maxVal)*100,0);
@@ -1518,7 +1721,6 @@ function AnalyticsChart({data}){
               </svg>
             )}
           </div>
-          {/* Labels de meses — HTML puro, tamaño real, nunca distorsionados */}
           <div style={{display:'flex',position:'absolute',bottom:0,left:0,right:0}}>
             {data.map((d,i)=>(
               <div key={i} style={{flex:1,textAlign:'center',fontSize:12,color:hoverIdx===i?'var(--primary)':'var(--text3)',
@@ -1527,25 +1729,17 @@ function AnalyticsChart({data}){
               </div>
             ))}
           </div>
-          {/* SVG vacío solo para mantener la altura correcta */}
           <div style={{height:20}}/>
 
-          {/* Tooltip */}
           {tooltip&&(
             <div style={{
-              position:'absolute',
-              top:0,
+              position:'absolute',top:0,
               left:`${(tooltip.idx/data.length)*100+50/data.length}%`,
               transform:'translateX(-50%)',
-              background:'var(--surface)',
-              border:'1px solid var(--border)',
-              borderRadius:10,
-              padding:'10px 14px',
-              fontSize:12,
-              pointerEvents:'none',
-              whiteSpace:'nowrap',
-              boxShadow:'0 4px 20px rgba(0,0,0,0.15)',
-              zIndex:20,
+              background:'var(--surface)',border:'1px solid var(--border)',
+              borderRadius:10,padding:'10px 14px',fontSize:12,
+              pointerEvents:'none',whiteSpace:'nowrap',
+              boxShadow:'0 4px 20px rgba(0,0,0,0.15)',zIndex:20,
             }}>
               <div style={{fontWeight:700,color:'var(--text)',marginBottom:6,fontSize:13}}>{tooltip.label}</div>
               <div style={{display:'flex',flexDirection:'column',gap:3}}>
@@ -1571,13 +1765,210 @@ function AnalyticsChart({data}){
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// ANALYTICS
-// ══════════════════════════════════════════════════════════════════════════
+// ── COMPARATIVA MES A MES ─────────────────────────────────────────────────
+function ComparativaMes({txns}){
+  const today=new Date();
+  const thisMonthKey=today.toISOString().slice(0,7);
+  const prevMonth=new Date(today.getFullYear(),today.getMonth()-1,1);
+  const prevMonthKey=prevMonth.toISOString().slice(0,7);
+  const prevPrevMonth=new Date(today.getFullYear(),today.getMonth()-2,1);
+  const prevPrevKey=prevPrevMonth.toISOString().slice(0,7);
+
+  const thisLabel=today.toLocaleString('es',{month:'long'});
+  const prevLabel=prevMonth.toLocaleString('es',{month:'long'});
+
+  const expensesByCategory=(monthKey)=>{
+    const map={};
+    txns.filter(t=>t.type==='expense'&&t.date?.startsWith(monthKey)).forEach(t=>{
+      const cat=t.categories?.name||'Sin categoría';
+      map[cat]=(map[cat]||0)+Number(t.amount);
+    });
+    return map;
+  };
+
+  const thisCats=expensesByCategory(thisMonthKey);
+  const prevCats=expensesByCategory(prevMonthKey);
+  const prevPrevCats=expensesByCategory(prevPrevKey);
+
+  // Totales generales
+  const thisTotal=Object.values(thisCats).reduce((s,v)=>s+v,0);
+  const prevTotal=Object.values(prevCats).reduce((s,v)=>s+v,0);
+  const totalDiff=prevTotal>0?((thisTotal-prevTotal)/prevTotal)*100:0;
+
+  const thisIncome=txns.filter(t=>t.type==='income'&&t.date?.startsWith(thisMonthKey)).reduce((s,t)=>s+Number(t.amount),0);
+  const prevIncome=txns.filter(t=>t.type==='income'&&t.date?.startsWith(prevMonthKey)).reduce((s,t)=>s+Number(t.amount),0);
+  const incomeDiff=prevIncome>0?((thisIncome-prevIncome)/prevIncome)*100:0;
+
+  // Unir todas las categorías que aparecen en alguno de los dos meses
+  const allCats=[...new Set([...Object.keys(thisCats),...Object.keys(prevCats)])].sort((a,b)=>{
+    const total=(thisCats[b]||0)+(prevCats[b]||0)-(thisCats[a]||0)-(prevCats[a]||0);
+    return total;
+  });
+
+  if(allCats.length===0)return(
+    <Card>
+      <CardHeader title="Comparativa mes a mes"/>
+      <Empty msg="Sin datos suficientes para comparar"/>
+    </Card>
+  );
+
+  const maxCatVal=Math.max(...allCats.flatMap(c=>[thisCats[c]||0,prevCats[c]||0]),1);
+
+  return(
+    <Card>
+      <CardHeader title={`Comparativa: ${prevLabel} vs ${thisLabel}`} action={
+        <div style={{display:'flex',gap:12,fontSize:11}}>
+          <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:10,height:3,background:'var(--text3)',borderRadius:2,display:'inline-block'}}/>{prevLabel}</span>
+          <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:10,height:3,background:'var(--primary)',borderRadius:2,display:'inline-block'}}/>{thisLabel}</span>
+        </div>
+      }/>
+
+      {/* Resumen global */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:20}}>
+        {/* Gastos */}
+        <div style={{background:'var(--surface2)',borderRadius:12,padding:'14px 16px'}}>
+          <div style={{fontSize:11,color:'var(--text3)',marginBottom:6}}>Total gastos</div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:6}}>
+            <div>
+              <div style={{fontSize:10,color:'var(--text3)',marginBottom:1}}>{prevLabel}</div>
+              <div style={{fontSize:15,fontWeight:600,color:'var(--text3)'}}>${money(prevTotal,0)}</div>
+            </div>
+            <div style={{fontSize:20,color:'var(--border2)'}}>→</div>
+            <div style={{textAlign:'right'}}>
+              <div style={{fontSize:10,color:'var(--text3)',marginBottom:1}}>{thisLabel}</div>
+              <div style={{fontSize:15,fontWeight:700,color:'var(--text)'}}>${money(thisTotal,0)}</div>
+            </div>
+          </div>
+          <div style={{
+            display:'inline-flex',alignItems:'center',gap:5,
+            fontSize:12,fontWeight:600,
+            color:totalDiff>10?'var(--danger)':totalDiff<-10?'var(--success)':'var(--warning)',
+            background:totalDiff>10?'var(--danger-bg)':totalDiff<-10?'var(--success-bg)':'var(--warning-bg)',
+            borderRadius:99,padding:'3px 10px',
+          }}>
+            {totalDiff>0?'↑':'↓'} {Math.abs(totalDiff).toFixed(1)}%
+            <span style={{fontWeight:400,fontSize:11,opacity:0.8}}>
+              {totalDiff>10?'Más gastos':totalDiff<-10?'Menos gastos':'Similar'}
+            </span>
+          </div>
+        </div>
+
+        {/* Ingresos */}
+        <div style={{background:'var(--surface2)',borderRadius:12,padding:'14px 16px'}}>
+          <div style={{fontSize:11,color:'var(--text3)',marginBottom:6}}>Total ingresos</div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:6}}>
+            <div>
+              <div style={{fontSize:10,color:'var(--text3)',marginBottom:1}}>{prevLabel}</div>
+              <div style={{fontSize:15,fontWeight:600,color:'var(--text3)'}}>${money(prevIncome,0)}</div>
+            </div>
+            <div style={{fontSize:20,color:'var(--border2)'}}>→</div>
+            <div style={{textAlign:'right'}}>
+              <div style={{fontSize:10,color:'var(--text3)',marginBottom:1}}>{thisLabel}</div>
+              <div style={{fontSize:15,fontWeight:700,color:'var(--text)'}}>${money(thisIncome,0)}</div>
+            </div>
+          </div>
+          <div style={{
+            display:'inline-flex',alignItems:'center',gap:5,
+            fontSize:12,fontWeight:600,
+            color:incomeDiff>=0?'var(--success)':'var(--danger)',
+            background:incomeDiff>=0?'var(--success-bg)':'var(--danger-bg)',
+            borderRadius:99,padding:'3px 10px',
+          }}>
+            {incomeDiff>=0?'↑':'↓'} {Math.abs(incomeDiff).toFixed(1)}%
+          </div>
+        </div>
+      </div>
+
+      {/* Tabla por categoría */}
+      <div style={{fontSize:12,color:'var(--text3)',fontWeight:600,marginBottom:10,textTransform:'uppercase',letterSpacing:'0.5px'}}>Por categoría</div>
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        {allCats.map(cat=>{
+          const thisVal=thisCats[cat]||0;
+          const prevVal=prevCats[cat]||0;
+          const diff=prevVal>0?((thisVal-prevVal)/prevVal)*100:thisVal>0?100:0;
+          const isNew=prevVal===0&&thisVal>0;
+          const isGone=thisVal===0&&prevVal>0;
+          const isUp=diff>0;
+          const diffColor=diff>20?'var(--danger)':diff<-20?'var(--success)':'var(--warning)';
+          const diffBg=diff>20?'var(--danger-bg)':diff<-20?'var(--success-bg)':'var(--warning-bg)';
+          const maxBar=Math.max(thisVal,prevVal,1);
+
+          return(
+            <div key={cat} style={{borderRadius:10,padding:'12px 14px',background:'var(--surface2)',border:'1px solid var(--border)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <span style={{fontSize:13,fontWeight:500,color:'var(--text)'}}>{cat}</span>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <div style={{textAlign:'right',fontSize:12}}>
+                    <span style={{color:'var(--text3)'}}>${money(prevVal,0)}</span>
+                    <span style={{color:'var(--text3)',margin:'0 6px'}}>→</span>
+                    <span style={{fontWeight:600,color:'var(--text)'}}>${money(thisVal,0)}</span>
+                  </div>
+                  {isNew&&<span style={{fontSize:11,background:'var(--primary-light)',color:'var(--primary)',borderRadius:99,padding:'2px 8px',fontWeight:600}}>Nuevo</span>}
+                  {isGone&&<span style={{fontSize:11,background:'var(--surface)',color:'var(--text3)',borderRadius:99,padding:'2px 8px',fontWeight:600}}>Sin gasto</span>}
+                  {!isNew&&!isGone&&<span style={{
+                    fontSize:11,fontWeight:700,color:diffColor,background:diffBg,
+                    borderRadius:99,padding:'2px 9px',
+                  }}>
+                    {isUp?'↑':'↓'} {Math.abs(diff).toFixed(0)}%
+                  </span>}
+                </div>
+              </div>
+              {/* Barras comparativas */}
+              <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                {/* Mes anterior */}
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:10,color:'var(--text3)',width:28,flexShrink:0,textAlign:'right'}}>{prevLabel.slice(0,3)}</span>
+                  <div style={{flex:1,height:6,background:'var(--border)',borderRadius:99,overflow:'hidden'}}>
+                    <div style={{height:6,width:`${(prevVal/maxBar)*100}%`,background:'var(--text3)',borderRadius:99,opacity:0.5,transition:'width .4s'}}/>
+                  </div>
+                </div>
+                {/* Mes actual */}
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:10,color:'var(--primary)',width:28,flexShrink:0,textAlign:'right',fontWeight:600}}>{thisLabel.slice(0,3)}</span>
+                  <div style={{flex:1,height:6,background:'var(--border)',borderRadius:99,overflow:'hidden'}}>
+                    <div style={{height:6,width:`${(thisVal/maxBar)*100}%`,background:'var(--primary)',borderRadius:99,transition:'width .4s'}}/>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Insight resumen */}
+      {(()=>{
+        const biggestUp=allCats.filter(c=>thisCats[c]&&prevCats[c]).sort((a,b)=>{
+          const da=((thisCats[a]-prevCats[a])/prevCats[a]);
+          const db=((thisCats[b]-prevCats[b])/prevCats[b]);
+          return db-da;
+        })[0];
+        const biggestDown=allCats.filter(c=>thisCats[c]&&prevCats[c]).sort((a,b)=>{
+          const da=((thisCats[a]-prevCats[a])/prevCats[a]);
+          const db=((thisCats[b]-prevCats[b])/prevCats[b]);
+          return da-db;
+        })[0];
+        if(!biggestUp&&!biggestDown)return null;
+        const upPct=biggestUp&&prevCats[biggestUp]>0?((thisCats[biggestUp]-prevCats[biggestUp])/prevCats[biggestUp]*100):0;
+        const downPct=biggestDown&&prevCats[biggestDown]>0?((thisCats[biggestDown]-prevCats[biggestDown])/prevCats[biggestDown]*100):0;
+        return(
+          <div style={{marginTop:14,display:'flex',gap:8,flexWrap:'wrap'}}>
+            {biggestUp&&upPct>5&&<div style={{flex:1,minWidth:200,background:'var(--danger-bg)',border:'1px solid #fecaca',borderRadius:10,padding:'10px 14px',fontSize:12,color:'var(--text)'}}>
+              📈 Mayor aumento: <strong>{biggestUp}</strong> subió un {upPct.toFixed(0)}% respecto a {prevLabel}
+            </div>}
+            {biggestDown&&downPct<-5&&<div style={{flex:1,minWidth:200,background:'var(--success-bg)',border:'1px solid #bbf7d0',borderRadius:10,padding:'10px 14px',fontSize:12,color:'var(--text)'}}>
+              📉 Mayor reducción: <strong>{biggestDown}</strong> bajó un {Math.abs(downPct).toFixed(0)}% respecto a {prevLabel}
+            </div>}
+          </div>
+        );
+      })()}
+    </Card>
+  );
+}
+
 function Analytics(){
   const [txns,setTxns]=useState([]);
   const [loading,setLoading]=useState(true);
-  const [mode,setMode]=useState('period'); // 'period' | 'month'
+  const [mode,setMode]=useState('period');
   const [period,setPeriod]=useState('6m');
   const [selectedMonth,setSelectedMonth]=useState(new Date().toISOString().slice(0,7));
 
@@ -1586,10 +1977,8 @@ function Analytics(){
       .order('date',{ascending:true}).then(r=>{setTxns(r.data||[]);setLoading(false);});
   },[]);
 
-  // Generar meses según modo y período
   const getMonths=()=>{
     if(mode==='month'){
-      // Mes específico: mostrar los días del mes como semanas agrupadas
       return [{key:selectedMonth,label:new Date(selectedMonth+'-01').toLocaleString('es',{month:'long',year:'numeric'})}];
     }
     const n={'3m':3,'6m':6,'12m':12}[period]||6;
@@ -1600,7 +1989,6 @@ function Analytics(){
   };
   const months=getMonths();
 
-  // Filtro de txns según modo
   const filteredTxns=mode==='month'
     ?txns.filter(t=>t.date?.startsWith(selectedMonth))
     :(()=>{
@@ -1616,7 +2004,6 @@ function Analytics(){
     return{label:m.label,income:inc,expenses:exp,net:inc-exp};
   });
 
-  // Totales
   const totalInc=mode==='month'
     ?filteredTxns.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount),0)
     :byMonth.reduce((s,m)=>s+m.income,0);
@@ -1626,7 +2013,6 @@ function Analytics(){
   const totalNet=totalInc-totalExp;
   const avgExp=mode==='month'?totalExp:totalExp/months.length||0;
 
-  // Por categoría (top 6)
   const byCat=Object.values(
     filteredTxns.filter(t=>t.type==='expense').reduce((acc,t)=>{
       const n=t.categories?.name||'Otros';
@@ -1635,7 +2021,6 @@ function Analytics(){
     },{})
   ).sort((a,b)=>b.value-a.value).slice(0,6);
 
-  // Por tipo de pago
   const byMethod=Object.values(
     filteredTxns.filter(t=>t.type==='expense').reduce((acc,t)=>{
       const m=t.payment_method||'other';
@@ -1646,7 +2031,6 @@ function Analytics(){
 
   const methodLabels={cash:'Efectivo',debit:'Débito',credit:'Crédito',transfer:'Transferencia',digital:'Digital',other:'Otro'};
 
-  // Tendencia semana actual vs anterior
   const now=new Date();
   const startOfWeek=new Date(now);startOfWeek.setDate(now.getDate()-now.getDay());
   const startOfLastWeek=new Date(startOfWeek);startOfLastWeek.setDate(startOfWeek.getDate()-7);
@@ -1654,12 +2038,10 @@ function Analytics(){
   const lastWeekExp=txns.filter(t=>t.type==='expense'&&new Date(t.date)>=startOfLastWeek&&new Date(t.date)<startOfWeek).reduce((s,t)=>s+Number(t.amount),0);
   const weekDiff=lastWeekExp>0?((thisWeekExp-lastWeekExp)/lastWeekExp*100):0;
 
-  // Transacciones impulsivas
   const impulsive=filteredTxns.filter(t=>t.is_impulsive&&t.type==='expense');
   const impulsiveTotal=impulsive.reduce((s,t)=>s+Number(t.amount),0);
   const impulsivePct=totalExp>0?(impulsiveTotal/totalExp*100):0;
 
-  // Gastos por día de la semana
   const byDow=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'].map((label,dow)=>{
     const val=filteredTxns.filter(t=>t.type==='expense'&&new Date(t.date).getDay()===dow).reduce((s,t)=>s+Number(t.amount),0);
     return{label,value:val};
@@ -1670,19 +2052,16 @@ function Analytics(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:16}}>
-      {/* Header */}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
         <div>
           <h1 style={{fontSize:20,fontWeight:700,letterSpacing:'-0.3px'}}>Analytics</h1>
           <p style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Análisis detallado de tus finanzas</p>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-          {/* Toggle modo */}
           <div style={{display:'flex',background:'var(--surface2)',borderRadius:99,padding:3,border:'1px solid var(--border)'}}>
             <button onClick={()=>setMode('period')} style={{padding:'5px 14px',borderRadius:99,border:'none',fontSize:12,fontWeight:500,cursor:'pointer',background:mode==='period'?'var(--surface)':'transparent',color:mode==='period'?'var(--text)':'var(--text3)',boxShadow:mode==='period'?'0 1px 3px rgba(0,0,0,0.1)':'none',transition:'all .15s'}}>Período</button>
             <button onClick={()=>setMode('month')} style={{padding:'5px 14px',borderRadius:99,border:'none',fontSize:12,fontWeight:500,cursor:'pointer',background:mode==='month'?'var(--surface)':'transparent',color:mode==='month'?'var(--text)':'var(--text3)',boxShadow:mode==='month'?'0 1px 3px rgba(0,0,0,0.1)':'none',transition:'all .15s'}}>Mes específico</button>
           </div>
-          {/* Opciones según modo */}
           {mode==='period'?(
             <div style={{display:'flex',gap:6}}>
               {[['3m','3 meses'],['6m','6 meses'],['12m','12 meses']].map(([v,l])=>(
@@ -1696,7 +2075,6 @@ function Analytics(){
         </div>
       </div>
 
-      {/* KPIs */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
         <StatCard label="Ingresos período" value={`$${money(totalInc,2).split(',')[0]}`} cents={money(totalInc,2).split(',')[1]||'00'}/>
         <StatCard label="Gastos período" value={`$${money(totalExp,2).split(',')[0]}`} cents={money(totalExp,2).split(',')[1]||'00'}/>
@@ -1704,16 +2082,15 @@ function Analytics(){
         <StatCard label={mode==='month'?'Total gastos mes':'Gasto promedio/mes'} value={`$${money(avgExp,2).split(',')[0]}`} cents={money(avgExp,2).split(',')[1]||'00'}/>
       </div>
 
-      {/* Gráfico principal */}
       <Card>
         <CardHeader title="Evolución de ingresos y gastos"/>
         <AnalyticsChart data={byMonth}/>
       </Card>
 
+      {/* ── COMPARATIVA MES A MES (siempre visible en analytics) ── */}
+      <ComparativaMes txns={txns}/>
 
-      {/* Row: Categorías + Método de pago */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        {/* Top categorías */}
         <Card>
           <CardHeader title="Gastos por categoría"/>
           {byCat.length===0?<Empty msg="Sin datos"/>:
@@ -1742,7 +2119,6 @@ function Analytics(){
           </div>}
         </Card>
 
-        {/* Método de pago */}
         <Card>
           <CardHeader title="Gastos por método de pago"/>
           {byMethod.length===0?<Empty msg="Sin datos"/>:
@@ -1768,153 +2144,43 @@ function Analytics(){
         </Card>
       </div>
 
-      {/* Widget: Proyección mensual */}
-      {(()=>{
-        const today=new Date();
-        const dayOfMonth=today.getDate();
-        const daysInMonth=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
-        const daysLeft=daysInMonth-dayOfMonth;
-        const thisMonth=today.toISOString().slice(0,7);
-        const monthExp=filteredTxns.filter(t=>t.type==='expense'&&t.date?.startsWith(thisMonth)).reduce((s,t)=>s+Number(t.amount),0);
-        const avgPerDay=dayOfMonth>0?monthExp/dayOfMonth:0;
-        const projected=avgPerDay*daysInMonth;
-        const projectedRemaining=avgPerDay*daysLeft;
-        const pctMonth=(dayOfMonth/daysInMonth)*100;
-        // Barras por día del mes actual
-        const dailyAmounts={};
-        filteredTxns.filter(t=>t.type==='expense'&&t.date?.startsWith(thisMonth)).forEach(t=>{
-          const day=parseInt(t.date.split('-')[2]);
-          dailyAmounts[day]=(dailyAmounts[day]||0)+Number(t.amount);
-        });
-        const maxDay=Math.max(...Object.values(dailyAmounts),avgPerDay,1);
-        const overAvg=projected>totalExp*1.2;
-        return mode==='month'?(
-          <Card>
-            <CardHeader title={`Proyección — ${new Date(selectedMonth+'-01').toLocaleString('es',{month:'long',year:'numeric'})}`}/>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:16}}>
-              <div style={{background:'var(--surface2)',borderRadius:10,padding:'12px 14px'}}>
-                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Promedio por día</div>
-                <div style={{fontSize:20,fontWeight:700,color:'var(--text)'}}>${money(avgPerDay,0)}</div>
-                <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>día {dayOfMonth} de {daysInMonth}</div>
-              </div>
-              <div style={{background:'var(--surface2)',borderRadius:10,padding:'12px 14px'}}>
-                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Proyección fin de mes</div>
-                <div style={{fontSize:20,fontWeight:700,color:overAvg?'var(--danger)':'var(--text)'}}>${money(projected,0)}</div>
-                <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>si mantenés el ritmo</div>
-              </div>
-              <div style={{background:overAvg?'var(--danger-bg)':'var(--success-bg)',borderRadius:10,padding:'12px 14px',border:`1px solid ${overAvg?'#fecaca':'#bbf7d0'}`}}>
-                <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Quedan {daysLeft} días</div>
-                <div style={{fontSize:20,fontWeight:700,color:overAvg?'var(--danger)':'var(--success)'}}>${money(projectedRemaining,0)}</div>
-                <div style={{fontSize:11,color:overAvg?'var(--danger)':'var(--success)',marginTop:2}}>{overAvg?'⚠ Ritmo alto':'✓ Ritmo normal'}</div>
-              </div>
-            </div>
-            {/* Barra de progreso del mes */}
-            <div style={{marginBottom:14}}>
-              <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--text3)',marginBottom:5}}>
-                <span>Inicio del mes</span>
-                <span style={{color:'var(--primary)',fontWeight:600}}>Hoy — día {dayOfMonth}</span>
-                <span>Fin del mes</span>
-              </div>
-              <div style={{height:6,background:'var(--surface2)',borderRadius:99,overflow:'hidden'}}>
-                <div style={{height:6,width:`${pctMonth}%`,background:'var(--primary)',borderRadius:99}}/>
-              </div>
-            </div>
-            {/* Mini barras por día */}
-            <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>Gasto por día del mes</div>
-            <div style={{display:'flex',alignItems:'flex-end',gap:2,height:60}}>
-              {Array.from({length:daysInMonth},(_,i)=>{
-                const day=i+1;
-                const val=dailyAmounts[day]||0;
-                const hPct=(val/maxDay)*100;
-                const isToday=day===dayOfMonth;
-                const isFuture=day>dayOfMonth;
-                const isAboveAvg=val>avgPerDay*1.3;
-                return(
-                  <div key={day} title={`Día ${day}: $${money(val,0)}`} style={{
-                    flex:1,height:`${Math.max(hPct,isFuture?0:0.5)}%`,
-                    minHeight:isFuture?0:val>0?2:1,
-                    background:isFuture?'var(--border)':isToday?'var(--primary)':isAboveAvg?'var(--danger)':'#8470FF80',
-                    borderRadius:'2px 2px 0 0',
-                    opacity:isFuture?0.3:1,
-                    transition:'height .3s',
-                    cursor:'default',
-                    position:'relative',
-                  }}>
-                    {isToday&&<div style={{position:'absolute',top:-16,left:'50%',transform:'translateX(-50%)',fontSize:9,color:'var(--primary)',fontWeight:700,whiteSpace:'nowrap'}}>hoy</div>}
-                  </div>
-                );
-              })}
-            </div>
-            {/* Línea de promedio */}
-            <div style={{position:'relative',marginTop:2}}>
-              <div style={{position:'absolute',top:-64,left:0,right:0,borderTop:'1.5px dashed var(--warning)',pointerEvents:'none'}}
-                style={{top:`${100-(avgPerDay/maxDay)*100}%`}}/>
-            </div>
-            <div style={{display:'flex',gap:12,marginTop:10,fontSize:11}}>
-              <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:10,height:10,borderRadius:2,background:'#8470FF80',display:'inline-block'}}/>Normal</span>
-              <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:10,height:10,borderRadius:2,background:'var(--danger)',display:'inline-block'}}/>Alto (+30% del promedio)</span>
-              <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:10,height:10,borderRadius:2,background:'var(--primary)',display:'inline-block'}}/>Hoy</span>
-              <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:10,height:10,borderRadius:2,background:'var(--border)',display:'inline-block',opacity:0.3}}/>Días restantes</span>
-            </div>
-          </Card>
-        ):null;
-      })()}
-
-      {/* ── RENDIMIENTO FINANCIERO ─────────────────────────────────── */}
       {(()=>{
         if(totalInc===0&&totalExp===0) return null;
-
-        // Métricas clave
         const savingsRate = totalInc>0 ? ((totalInc-totalExp)/totalInc)*100 : null;
         const expenseRatio = totalInc>0 ? (totalExp/totalInc)*100 : null;
         const topCat = byCat[0];
         const topCatPct = totalExp>0&&topCat ? (topCat.value/totalExp)*100 : 0;
-
-        // Evaluación por categoría vs presupuesto (solo modo mes)
-        const catAnalysis = byCat.map(c=>{
-          return { name:c.name, value:c.value, pct:(c.value/totalExp*100) };
-        });
-
-        // Score financiero 0-100
+        const catAnalysis = byCat.map(c=>({ name:c.name, value:c.value, pct:(c.value/totalExp*100) }));
         let score = 50;
         let scoreDetails = [];
-
         if(savingsRate!==null){
           if(savingsRate>=30){ score+=25; scoreDetails.push({txt:'Ahorrás más del 30% de tus ingresos',ok:true}); }
           else if(savingsRate>=15){ score+=10; scoreDetails.push({txt:'Ahorrás entre 15-30% de tus ingresos',ok:true}); }
           else if(savingsRate>=0){ score-=5; scoreDetails.push({txt:'Ahorrás menos del 15% de tus ingresos',ok:false}); }
           else{ score-=25; scoreDetails.push({txt:'Tus gastos superan tus ingresos',ok:false}); }
         }
-
         if(topCatPct>50) { score-=15; scoreDetails.push({txt:`${topCat?.name} representa más del 50% de tus gastos`,ok:false}); }
         else if(topCatPct>35) { score-=5; scoreDetails.push({txt:`${topCat?.name} es tu gasto más alto (${topCatPct.toFixed(0)}%)`,ok:null}); }
         else { score+=10; scoreDetails.push({txt:'Tus gastos están bien distribuidos entre categorías',ok:true}); }
-
         const restPct = catAnalysis.find(c=>c.name==='Restaurantes')?.pct||0;
         const entPct  = catAnalysis.find(c=>c.name==='Entretenimiento')?.pct||0;
         const discPct = restPct + entPct;
         if(discPct>40){ score-=10; scoreDetails.push({txt:`Salidas y entretenimiento son el ${discPct.toFixed(0)}% de tus gastos`,ok:false}); }
         else if(discPct>25){ scoreDetails.push({txt:`Salidas y entretenimiento: ${discPct.toFixed(0)}% de tus gastos`,ok:null}); }
         else if(discPct>0){ score+=5; scoreDetails.push({txt:`Salidas y entretenimiento bajo control (${discPct.toFixed(0)}%)`,ok:true}); }
-
         score = Math.min(100, Math.max(0, score));
-
         const scoreColor = score>=75?'var(--success)':score>=50?'var(--warning)':'var(--danger)';
         const scoreLabel = score>=75?'Excelente':score>=60?'Buena':score>=40?'Regular':'Crítica';
         const scoreBg    = score>=75?'var(--success-bg)':score>=50?'var(--warning-bg)':'var(--danger-bg)';
-
-        // Consejo principal
         let mainTip = '';
         if(savingsRate===null||savingsRate<=0) mainTip='Registrá tus ingresos para ver tu tasa de ahorro real.';
         else if(savingsRate<15) mainTip=`Con una tasa de ahorro del ${savingsRate.toFixed(1)}%, intentá reducir gastos variables como salidas o servicios.`;
         else if(savingsRate<30) mainTip=`Bien. Con ${savingsRate.toFixed(1)}% de ahorro estás en camino. Optimizá categorías de salidas para mejorar.`;
         else mainTip=`Excelente tasa de ahorro de ${savingsRate.toFixed(1)}%. Seguí así y considerá invertir el excedente.`;
-
         return(
           <Card>
             <CardHeader title="Rendimiento financiero"/>
             <div style={{display:'flex',gap:16,alignItems:'flex-start',flexWrap:'wrap'}}>
-              {/* Score circular */}
               <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,flexShrink:0}}>
                 <div style={{position:'relative',width:90,height:90}}>
                   <svg viewBox="0 0 90 90" style={{transform:'rotate(-90deg)'}}>
@@ -1929,15 +2195,10 @@ function Analytics(){
                 </div>
                 <span style={{fontSize:13,fontWeight:700,color:scoreColor,background:scoreBg,borderRadius:99,padding:'3px 12px'}}>{scoreLabel}</span>
               </div>
-
-              {/* Métricas + detalles */}
               <div style={{flex:1,minWidth:200}}>
-                {/* Consejo principal */}
                 <div style={{background:'var(--surface2)',borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:'var(--text)',lineHeight:1.5}}>
                   💡 {mainTip}
                 </div>
-
-                {/* Checklist de factores */}
                 <div style={{display:'flex',flexDirection:'column',gap:6}}>
                   {scoreDetails.map((d,i)=>(
                     <div key={i} style={{display:'flex',alignItems:'center',gap:8,fontSize:12,color:'var(--text2)'}}>
@@ -1947,8 +2208,6 @@ function Analytics(){
                   ))}
                 </div>
               </div>
-
-              {/* Ratios clave */}
               <div style={{display:'flex',flexDirection:'column',gap:8,flexShrink:0,minWidth:150}}>
                 {savingsRate!==null&&<div style={{background:'var(--surface2)',borderRadius:10,padding:'10px 14px',textAlign:'center'}}>
                   <div style={{fontSize:10,color:'var(--text3)',marginBottom:3}}>Tasa de ahorro</div>
@@ -1966,9 +2225,7 @@ function Analytics(){
         );
       })()}
 
-      {/* Row: Gastos por día de la semana + Insights */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        {/* Gastos por día de semana */}
         <Card>
           <CardHeader title="Gastos por día de la semana"/>
           <div style={{display:'flex',alignItems:'flex-end',gap:6,height:100,padding:'0 4px'}}>
@@ -1986,23 +2243,19 @@ function Analytics(){
           </div>
         </Card>
 
-        {/* Insights / métricas clave */}
         <Card>
           <CardHeader title="Insights"/>
           <div style={{display:'flex',flexDirection:'column',gap:10}}>
-            {/* Esta semana vs anterior */}
             <div style={{background:'var(--surface2)',borderRadius:10,padding:'12px 14px'}}>
               <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Esta semana vs anterior</div>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <span style={{fontSize:16,fontWeight:700,color:'var(--text)'}}>${money(thisWeekExp,0)}</span>
                 <span style={{fontSize:12,fontWeight:600,padding:'3px 8px',borderRadius:99,background:weekDiff<=0?'var(--success-bg)':'var(--danger-bg)',color:weekDiff<=0?'var(--success)':'var(--danger)'}}>
-                  {weekDiff>0?'+':''}{weekDiff.toFixed(1)}% {weekDiff<=0?'↓':' ↑'}
+                  {weekDiff>0?'+':''}{weekDiff.toFixed(1)}% {weekDiff<=0?'↓':'↑'}
                 </span>
               </div>
               <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>Semana anterior: ${money(lastWeekExp,0)}</div>
             </div>
-
-            {/* Gastos impulsivos */}
             <div style={{background:impulsivePct>20?'var(--danger-bg)':'var(--surface2)',borderRadius:10,padding:'12px 14px',border:impulsivePct>20?'1px solid #fecaca':'none'}}>
               <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Gastos impulsivos</div>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -2013,14 +2266,12 @@ function Analytics(){
                 <div style={{height:4,width:`${Math.min(impulsivePct,100)}%`,background:impulsivePct>20?'var(--danger)':'var(--primary)',borderRadius:99}}/>
               </div>
             </div>
-
-            {/* Tasa de ahorro */}
             {totalInc>0&&(
               <div style={{background:'var(--surface2)',borderRadius:10,padding:'12px 14px'}}>
                 <div style={{fontSize:11,color:'var(--text3)',marginBottom:4}}>Tasa de ahorro del período</div>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                   <span style={{fontSize:16,fontWeight:700,color:totalNet>=0?'var(--success)':'var(--danger)'}}>{((totalNet/totalInc)*100).toFixed(1)}%</span>
-                  <span style={{fontSize:11,color:'var(--text3)'}}>{totalNet>=0?'Estás ahorrando':' Déficit'}</span>
+                  <span style={{fontSize:11,color:'var(--text3)'}}>{totalNet>=0?'Estás ahorrando':'Déficit'}</span>
                 </div>
                 <div style={{height:4,background:'var(--border)',borderRadius:99,marginTop:6,overflow:'hidden'}}>
                   <div style={{height:4,width:`${Math.min(Math.max((totalNet/totalInc)*100,0),100)}%`,background:totalNet>=0?'var(--success)':'var(--danger)',borderRadius:99}}/>
@@ -2043,11 +2294,12 @@ const NAV=[
   {id:'cuentas',label:'Cuentas'},
   {id:'presupuestos',label:'Presupuestos'},
   {id:'metas',label:'Metas'},
+  {id:'historial',label:'Historial'},
   {id:'analytics',label:'Analytics'},
   {id:'asistente',label:'Asistente IA'},
   {id:'configuracion',label:'Configuración'},
 ];
-const PAGES={dashboard:Dashboard,transacciones:Transacciones,cuentas:Cuentas,presupuestos:Presupuestos,metas:Metas,analytics:Analytics,asistente:Asistente,configuracion:Configuracion};
+const PAGES={dashboard:Dashboard,transacciones:Transacciones,cuentas:Cuentas,presupuestos:Presupuestos,metas:Metas,historial:Historial,analytics:Analytics,asistente:Asistente,configuracion:Configuracion};
 
 function App(){
   const [page,setPage]=useState('dashboard');
@@ -2057,7 +2309,6 @@ function App(){
   const [searchQuery,setSearchQuery]=useState('');
   const searchRef=useRef(null);
 
-  // Cerrar búsqueda con Escape
   useEffect(()=>{
     const handler=e=>{if(e.key==='Escape')setSearchOpen(false);};
     window.addEventListener('keydown',handler);
@@ -2071,6 +2322,8 @@ function App(){
     {id:'cuentas',label:'Cuentas',keywords:'banco billetera efectivo saldo'},
     {id:'presupuestos',label:'Presupuestos',keywords:'budget planificado limite'},
     {id:'metas',label:'Metas de ahorro',keywords:'objetivos goals ahorros'},
+    {id:'historial',label:'Historial de saldos',keywords:'evolución balance cuenta tiempo gráfico'},
+    {id:'analytics',label:'Analytics',keywords:'análisis comparativa mes categorias'},
     {id:'asistente',label:'Asistente IA',keywords:'chat ai inteligencia'},
     {id:'configuracion',label:'Configuración',keywords:'categorias settings ajustes'},
   ];
@@ -2088,20 +2341,16 @@ function App(){
 
   return(
     <div style={{display:'flex',minHeight:'100vh'}}>
-      {/* Sidebar */}
       <aside style={{width:sw,background:'var(--surface)',borderRight:'1px solid var(--border)',display:'flex',flexDirection:'column',position:'fixed',top:0,left:0,bottom:0,zIndex:100,transition:'width .2s',overflow:'hidden'}}>
-        {/* Logo */}
         <div style={{padding:collapsed?'18px 0':'18px 16px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10,justifyContent:collapsed?'center':'flex-start',marginBottom:8}}>
           <div style={{width:30,height:30,borderRadius:9,background:'var(--primary)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:11,fontWeight:800,flexShrink:0,letterSpacing:'-0.5px'}}>MF</div>
           {!collapsed&&<span style={{fontWeight:700,fontSize:15,color:'var(--text)',letterSpacing:'-0.3px',whiteSpace:'nowrap'}}>Mis Finanzas</span>}
         </div>
 
-        {/* Collapse btn */}
         <button onClick={()=>setCollapsed(c=>!c)} style={{position:'absolute',top:20,right:collapsed?8:-8,width:18,height:18,borderRadius:'50%',background:'var(--border)',border:'1px solid var(--border2)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--text3)',zIndex:10,transition:'right .2s'}}>
           <span style={{display:'flex',transform:collapsed?'rotate(180deg)':'none',transition:'transform .2s'}}>{Icons.chevron}</span>
         </button>
 
-        {/* Nav items */}
         <nav style={{flex:1,padding:'0 8px',display:'flex',flexDirection:'column',gap:2}}>
           {NAV.map(n=>(
             <button key={n.id} onClick={()=>setPage(n.id)} title={collapsed?n.label:''} style={{
@@ -2112,20 +2361,20 @@ function App(){
               fontWeight:page===n.id?600:400,fontSize:13,width:'100%',
               textAlign:'left',cursor:'pointer',border:'none',transition:'all .15s'
             }}>
-              <span style={{display:'flex',alignItems:'center',flexShrink:0,opacity:page===n.id?1:0.7}}>{Icons[n.id]}</span>
+              <span style={{display:'flex',alignItems:'center',flexShrink:0,opacity:page===n.id?1:0.7}}>
+                {Icons[n.id]||Icons.analytics}
+              </span>
               {!collapsed&&<span style={{whiteSpace:'nowrap'}}>{n.label}</span>}
             </button>
           ))}
         </nav>
 
-        {/* Bottom */}
         <div style={{padding:'8px',borderTop:'1px solid var(--border)'}}>
           {!collapsed&&<>
             <button style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',borderRadius:10,color:'var(--text3)',fontSize:13,width:'100%',border:'none',background:'transparent',cursor:'pointer'}}>
               <span style={{display:'flex',opacity:0.6}}>{Icons.help}</span>Ayuda
             </button>
           </>}
-          {/* Dark mode toggle */}
           <div style={{display:'flex',alignItems:'center',justifyContent:collapsed?'center':'flex-start',padding:collapsed?'8px 0':'4px 12px',gap:8}}>
             <button onClick={()=>setDark(d=>!d)} style={{display:'flex',alignItems:'center',gap:6,background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:99,padding:'5px 10px',cursor:'pointer',color:'var(--text2)',fontSize:12}}>
               <span style={{display:'flex'}}>{dark?Icons.sun:Icons.moon}</span>
@@ -2135,16 +2384,13 @@ function App(){
         </div>
       </aside>
 
-      {/* Main */}
       <main style={{marginLeft:sw,flex:1,transition:'margin-left .2s'}}>
-        {/* Top bar */}
         <div style={{background:'var(--surface)',borderBottom:'1px solid var(--border)',padding:'10px 24px',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,zIndex:50}}>
           <div>
             <h2 style={{fontSize:15,fontWeight:600,color:'var(--text)'}}>Bienvenido de vuelta</h2>
             <p style={{fontSize:12,color:'var(--text3)'}}>Es el mejor momento para gestionar tus finanzas</p>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
-            {/* Búsqueda funcional */}
             <div style={{position:'relative'}}>
               {searchOpen?(
                 <div style={{display:'flex',alignItems:'center',gap:8,background:'var(--surface2)',border:'1px solid var(--primary)',borderRadius:99,padding:'6px 14px',width:240,transition:'all .2s'}}>
@@ -2158,13 +2404,12 @@ function App(){
                   {Icons.search}<span>Buscar...</span><span style={{fontSize:10,background:'var(--border)',borderRadius:4,padding:'1px 5px',color:'var(--text3)'}}>⌘K</span>
                 </button>
               )}
-              {/* Dropdown resultados */}
               {searchOpen&&searchQuery.length>=0&&(
                 <div style={{position:'absolute',top:'calc(100% + 8px)',right:0,background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12,width:260,boxShadow:'0 8px 24px rgba(0,0,0,0.12)',zIndex:200,overflow:'hidden'}}>
                   <div style={{padding:'8px 12px 4px',fontSize:10,color:'var(--text3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.5px'}}>Secciones</div>
                   {searchResults.map(n=>(
                     <button key={n.id} onClick={()=>{setPage(n.id);setSearchOpen(false);setSearchQuery('');}} style={{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'9px 12px',border:'none',background:'transparent',cursor:'pointer',textAlign:'left',color:'var(--text)',fontSize:13,transition:'background .1s'}}>
-                      <span style={{color:'var(--primary)',display:'flex',opacity:0.8}}>{Icons[n.id]}</span>
+                      <span style={{color:'var(--primary)',display:'flex',opacity:0.8}}>{Icons[n.id]||Icons.analytics}</span>
                       {n.label}
                     </button>
                   ))}
@@ -2175,7 +2420,6 @@ function App(){
           </div>
         </div>
 
-        {/* Page content */}
         <div style={{padding:24}}>
           <Page/>
         </div>
