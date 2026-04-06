@@ -2537,7 +2537,7 @@ function Calendario(){
 
                 return(
                   <div key={day} onClick={()=>setSelectedDate(dateStr)} style={{
-                    minHeight:64,padding:'6px 4px',borderRadius:10,cursor:'pointer',
+                    minHeight:72,padding:'6px 5px 4px',borderRadius:10,cursor:'pointer',
                     background:isSelected?'var(--primary)':isToday?'var(--primary-light)':'transparent',
                     border:`1.5px solid ${isSelected?'var(--primary)':isToday?'var(--primary)':'transparent'}`,
                     transition:'all .15s',
@@ -2548,16 +2548,26 @@ function Calendario(){
                       color:isSelected?'#fff':isToday?'var(--primary)':'var(--text)',
                       textAlign:'center',marginBottom:4,
                     }}>{day}</div>
-                    {/* Puntos de eventos */}
-                    <div style={{display:'flex',flexWrap:'wrap',gap:2,justifyContent:'center'}}>
-                      {dayEvs.slice(0,3).map((ev,ei)=>(
+                    {/* Eventos con etiqueta */}
+                    <div style={{display:'flex',flexDirection:'column',gap:2}}>
+                      {dayEvs.slice(0,2).map((ev,ei)=>(
                         <div key={ei} style={{
-                          width:6,height:6,borderRadius:'50%',
-                          background:isSelected?'rgba(255,255,255,0.7)':EVENT_TYPES[ev.type]?.color||'var(--primary)',
-                          opacity:ev.done?0.4:1,
-                        }}/>
+                          fontSize:9,fontWeight:600,lineHeight:1.2,
+                          background:isSelected?'rgba(255,255,255,0.2)':EVENT_TYPES[ev.type]?.bg,
+                          color:isSelected?'#fff':EVENT_TYPES[ev.type]?.color,
+                          borderRadius:4,padding:'2px 4px',
+                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                          opacity:ev.done?0.5:1,
+                          textDecoration:ev.done?'line-through':'none',
+                        }}>
+                          {ev.title}
+                        </div>
                       ))}
-                      {dayEvs.length>3&&<div style={{fontSize:9,color:isSelected?'rgba(255,255,255,0.7)':'var(--text3)'}}> +{dayEvs.length-3}</div>}
+                      {dayEvs.length>2&&(
+                        <div style={{fontSize:9,color:isSelected?'rgba(255,255,255,0.7)':'var(--text3)',paddingLeft:4}}>
+                          +{dayEvs.length-2} más
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
