@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mis Finanzas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.8.0/Recharts.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: #f7f7f8; color: #111827; min-height: 100vh; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 99px; }
+  input, select, textarea { font-family: inherit; }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; }
+  table { border-collapse: collapse; width: 100%; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+const { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } = Recharts;
+
+// ─── CONFIG ────────────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://bjmwzxkjrwuhponjwfhz.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJqbXd6eGtqcnd1aHBvbmp3Zmh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzMTcyMTIsImV4cCI6MjA5MDg5MzIxMn0.RnZfzkZ0k3nISrs6tpNXZs100Wd0q1rJhxGhekUjJ1c';
+// La Anthropic key se pide al usuario y se guarda en localStorage (nunca en el código)
+const getAnthropicKey = () => localStorage.getItem('anthropic_key') || '';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ─── CONSTANTS ─────────────────────────────────────────────────────────────
+const COLORS_TYPE = { income: '#22c55e', expense: '#ef4444', transfer: '#7c5cfc' };
+const LABELS_TYPE = { income: 'Ingreso', expense: 'Gasto', transfer: 'Transferencia' };
+const CHART_COLORS = ['#7c5cfc','#22c55e','#f59e0b','#ef4444','#00b1ef','#e879f9','#64748b'];
+const ACC_COLORS = { bank:'#22c55e', cash:'#f59e0b', digital_wallet:'#00b1ef', investment:'#f0b90b', other:'#7c5cfc' };
+const ACC_LABELS = { bank:'Banco', cash:'Efectivo', digital_wallet:'Billetera digital', investment:'Inversión / Cripto', other:'Otro' };
+const INP = { color:'#111827', background:'#fff' };
+
+// ─── LOCAL DATE HELPER ─────────────────────────────────────────────────────
+const localToday = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().split('T')[0];
+const fmt = d => d ? d.split('-').reverse().join('/') : '-';
+
+// ─── MODAL WRAPPER ─────────────────────────────────────────────────────────
+function Modal({ onClose, children }) {
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{
+      position:'fixed', inset:0, background:'rgba(0,0,0,0.35)', display:'flex',
+      alignItems:'center', justifyContent:'center', zIndex:999, padding:'1rem'
+    }}>
+      <div style={{ background:'#fff', borderRadius:20, padding:24, width:'100%', maxWidth:440, maxHeight:'90vh', overflowY:'auto' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ModalHeader({ title, onClose }) {
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+      <span style={{ fontWeight:500, fontSize:15 }}>{title}</span>
+      <button onClick={onClose} style={{ color:'#9ca3af', fontSize:20, lineHeight:1 }}>×</button>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+    <label style={{ fontSize:12, color:'#6b7280' }}>{label}</label>
+    {children}
+  </div>;
+}
+
+function Input({ ...p }) {
+  return <input {...p} style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:'8px 12px', fontSize:14, outline:'none', ...INP, ...p.style }} />;
+}
+
+function Select({ children, ...p }) {
+  return <select {...p} style={{ border:'1px solid #e5e7eb', borderRadius:10, padding:'8px 12px', fontSize:14, outline:'none', ...INP, ...p.style }}>{children}</select>;
+}
+
+function Btn({ variant='primary', ...p }) {
+  const styles = {
+    primary: { background:'#7c5cfc', color:'#fff' },
+    outline: { background:'#fff', color:'#374151', border:'1px solid #e5e7eb' },
+    danger:  { background:'#fef2f2', color:'#ef4444', border:'1px solid #fecaca' },
+    green:   { background:'#22c55e', color:'#fff' },
+  };
+  return <button {...p} style={{
+    borderRadius:12, padding:'10px 18px', fontSize:14, fontWeight:500,
+    opacity: p.disabled ? 0.5 : 1, cursor: p.disabled ? 'not-allowed':'pointer',
+    ...styles[variant], ...p.style
+  }} />;
+}
+
+function Card({ children, style }) {
+  return <div style={{ background:'#fff', border:'1px solid #f0f0f2', borderRadius:14, padding:16, ...style }}>{children}</div>;
+}
+
+function Stat({ label, value, color, sub }) {
+  return <Card>
+    <div style={{ fontSize:12, color:'#9ca3af', marginBottom:8 }}>{label}</div>
+    <div style={{ fontSize:22, fontWeight:600, color: color||'#111827' }}>{value}</div>
+    {sub && <div style={{ fontSize:12, color:'#9ca3af', marginTop:4 }}>{sub}</div>}
+  </Card>;
+}
+
+function Loading() { return <div style={{ padding:32, textAlign:'center', color:'#9ca3af', fontSize:14 }}>Cargando...</div>; }
+
+// ════════════════════════════════════════════════════════════════════════════
+// DASHBOARD
+// ════════════════════════════════════════════════════════════════════════════
+function HealthScore({ income, expenses }) {
+  if (!income) return null;
+  const rate = ((income - expenses) / income) * 100;
+  const score = Math.min(100, Math.max(0, Math.round(rate * 1.5)));
+  const c = score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444';
+  const lbl = score >= 70 ? 'Excelente' : score >= 40 ? 'Buena' : 'Crítica';
+  return <Card style={{ display:'flex', alignItems:'center', gap:16 }}>
+    <div style={{ width:56, height:56, borderRadius:'50%', border:`4px solid ${c}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+      <span style={{ fontWeight:600, color:c, fontSize:16 }}>{score}</span>
+    </div>
+    <div>
+      <div style={{ fontSize:12, color:'#9ca3af' }}>Salud financiera</div>
+      <div style={{ fontWeight:600, color:c }}>{lbl}</div>
+      <div style={{ fontSize:12, color:'#9ca3af' }}>Tasa de ahorro: {rate.toFixed(1)}%</div>
+    </div>
+    <div style={{ flex:1 }}>
+      <div style={{ height:8, background:'#f3f4f6', borderRadius:99, overflow:'hidden' }}>
+        <div style={{ height:8, width:`${score}%`, background:c, borderRadius:99, transition:'width .5s' }} />
+      </div>
+      <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'#9ca3af', marginTop:4 }}>
+        <span>0 — crítico</span><span>100 — óptimo</span>
+      </div>
+    </div>
+  </Card>;
+}
+
+function Dashboard() {
+  const [txns, setTxns] = useState([]);
+  const [accs, setAccs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [t, a] = await Promise.all([
+        sb.from('transactions').select('*, categories(name)').order('date', { ascending:false }),
+        sb.from('accounts').select('*').eq('is_active', true),
+      ]);
+      setTxns(t.data || []); setAccs(a.data || []); setLoading(false);
+    })();
+  }, []);
+
+  const thisMonth = new Date().toISOString().slice(0,7);
+  const month = txns.filter(t => t.date?.startsWith(thisMonth));
+  const income = month.filter(t => t.type==='income').reduce((s,t) => s+Number(t.amount),0);
+  const expenses = month.filter(t => t.type==='expense').reduce((s,t) => s+Number(t.amount),0);
+  const net = income - expenses;
+  const totalUSD = accs.filter(a => a.currency==='USD').reduce((s,a) => s+Number(a.balance),0);
+
+  const alert = expenses > income*0.8
+    ? { msg:'Tus gastos superan el 80% de tus ingresos este mes.', color:'#ef4444' }
+    : expenses > income*0.6
+    ? { msg:'Tus gastos están por encima del 60% de ingresos.', color:'#f59e0b' }
+    : null;
+
+  const last6 = Array.from({length:6}, (_,i) => {
+    const d = new Date(); d.setMonth(d.getMonth()-(5-i));
+    const key = d.toISOString().slice(0,7);
+    const label = d.toLocaleString('es',{month:'short'});
+    const inc = txns.filter(t => t.date?.startsWith(key) && t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
+    const exp = txns.filter(t => t.date?.startsWith(key) && t.type==='expense').reduce((s,t)=>s+Number(t.amount),0);
+    return { label, income:inc, expenses:exp, net:inc-exp };
+  });
+
+  const byCat = Object.values(
+    month.filter(t => t.type==='expense').reduce((acc,t) => {
+      const n = t.categories?.name||'Otros';
+      if (!acc[n]) acc[n] = { name:n, value:0 };
+      acc[n].value += Number(t.amount);
+      return acc;
+    }, {})
+  ).sort((a,b) => b.value-a.value);
+
+  const recent = txns.filter(t => t.type==='expense').slice(0,5);
+
+  if (loading) return <Loading />;
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div>
+        <h1 style={{ fontSize:20, fontWeight:600 }}>Dashboard</h1>
+        <p style={{ fontSize:14, color:'#9ca3af', marginTop:4 }}>{new Date().toLocaleString('es',{month:'long',year:'numeric'})}</p>
+      </div>
+      <HealthScore income={income} expenses={expenses} />
+      {alert && <div style={{ borderRadius:12, padding:'12px 16px', fontSize:14, display:'flex', alignItems:'center', gap:8, background:alert.color+'18', border:`1px solid ${alert.color}40`, color:alert.color }}>
+        <div style={{ width:6, height:6, borderRadius:'50%', background:alert.color, flexShrink:0 }} />{alert.msg}
+      </div>}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+        <Stat label="Balance total" value={`$${totalUSD.toLocaleString('en-US',{minimumFractionDigits:2})}`} sub="USD consolidado" />
+        <Stat label="Ingresos del mes" value={`+$${income.toLocaleString('en-US',{minimumFractionDigits:2})}`} color="#22c55e" sub="Este mes" />
+        <Stat label="Gastos del mes" value={`-$${expenses.toLocaleString('en-US',{minimumFractionDigits:2})}`} color="#ef4444" sub="Este mes" />
+        <Stat label="Flujo neto" value={`$${net.toLocaleString('en-US',{minimumFractionDigits:2})}`} color={net>=0?'#22c55e':'#ef4444'} sub={income?`${((net/income)*100).toFixed(0)}% tasa de ahorro`:'-'} />
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16 }}>
+        <Card>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+            <span style={{ fontWeight:500, fontSize:14 }}>Ingresos vs gastos</span>
+            <div style={{ display:'flex', gap:12, fontSize:12, color:'#9ca3af' }}>
+              <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:8, height:8, borderRadius:2, background:'#7c5cfc', display:'inline-block' }} />Ingresos</span>
+              <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:8, height:8, borderRadius:2, background:'#e5e7eb', display:'inline-block' }} />Gastos</span>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={last6} barGap={2}>
+              <XAxis dataKey="label" tick={{fontSize:11,fill:'#9ca3af'}} axisLine={false} tickLine={false} />
+              <YAxis tick={{fontSize:11,fill:'#9ca3af'}} axisLine={false} tickLine={false} width={40} />
+              <Tooltip formatter={v=>`$${v.toFixed(2)}`} contentStyle={{fontSize:12,border:'1px solid #e5e7eb',borderRadius:8}} />
+              <Bar dataKey="income" fill="#7c5cfc" radius={[4,4,0,0]} />
+              <Bar dataKey="expenses" fill="#e5e7eb" radius={[4,4,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{ marginTop:8, paddingTop:8, borderTop:'1px solid #f3f4f6' }}>
+            <div style={{ fontSize:12, color:'#9ca3af', marginBottom:4 }}>Tendencia flujo neto</div>
+            <ResponsiveContainer width="100%" height={50}>
+              <LineChart data={last6}>
+                <Line type="monotone" dataKey="net" stroke="#7c5cfc" strokeWidth={2} dot={false} />
+                <Tooltip formatter={v=>`$${v.toFixed(2)}`} contentStyle={{fontSize:12,border:'1px solid #e5e7eb',borderRadius:8}} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+        <Card>
+          <div style={{ fontWeight:500, fontSize:14, marginBottom:16 }}>Gastos por categoría</div>
+          {byCat.length > 0 ? <>
+            <ResponsiveContainer width="100%" height={120}>
+              <PieChart>
+                <Pie data={byCat} cx="50%" cy="50%" innerRadius={35} outerRadius={55} dataKey="value" paddingAngle={2}>
+                  {byCat.map((_,i) => <Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]} />)}
+                </Pie>
+                <Tooltip formatter={v=>`$${v.toFixed(2)}`} contentStyle={{fontSize:11,border:'1px solid #e5e7eb',borderRadius:8}} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:8 }}>
+              {byCat.slice(0,5).map((c,i) => <div key={c.name} style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <div style={{ width:7, height:7, borderRadius:'50%', background:CHART_COLORS[i%CHART_COLORS.length], flexShrink:0 }} />
+                <span style={{ fontSize:12, color:'#6b7280', flex:1 }}>{c.name}</span>
+                <span style={{ fontSize:12, fontWeight:500 }}>${c.value.toFixed(0)}</span>
+              </div>)}
+            </div>
+          </> : <div style={{ fontSize:12, color:'#9ca3af', textAlign:'center', padding:'32px 0' }}>Sin gastos este mes</div>}
+        </Card>
+      </div>
+      <Card>
+        <div style={{ fontWeight:500, fontSize:14, marginBottom:12 }}>Últimos gastos</div>
+        {recent.length === 0 ? <div style={{ fontSize:12, color:'#9ca3af' }}>Sin gastos registrados</div> : (
+          <table>
+            <thead>
+              <tr style={{ borderBottom:'1px solid #f3f4f6' }}>
+                {['Fecha','Descripción','Categoría','Monto'].map((h,i) => (
+                  <th key={h} style={{ textAlign:i===3?'right':'left', fontSize:12, color:'#9ca3af', fontWeight:400, paddingBottom:8 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {recent.map(t => <tr key={t.id} style={{ borderBottom:'1px solid #f9fafb' }}>
+                <td style={{ padding:'8px 0', fontSize:12, color:'#9ca3af' }}>{fmt(t.date)}</td>
+                <td style={{ padding:'8px 8px', fontSize:14, color:'#111827' }}>{t.description||'-'}</td>
+                <td style={{ padding:'8px 8px' }}><span style={{ fontSize:12, background:'#f9fafb', color:'#6b7280', borderRadius:6, padding:'2px 8px' }}>{t.categories?.name||'-'}</span></td>
+                <td style={{ textAlign:'right', fontSize:14, fontWeight:500, color:'#ef4444' }}>-${Number(t.amount).toFixed(2)}</td>
+              </tr>)}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// TRANSACCIONES
+// ════════════════════════════════════════════════════════════════════════════
+function TransactionModal({ accounts, categories, onClose, onSave }) {
+  const [type, setType] = useState('expense');
+  const [amount, setAmount] = useState('');
+  const [accountId, setAccountId] = useState(accounts[0]?.id||'');
+  const [categoryId, setCategoryId] = useState('');
+  const [date, setDate] = useState(localToday());
+  const [method, setMethod] = useState('cash');
+  const [desc, setDesc] = useState('');
+  const [recurring, setRecurring] = useState(false);
+  const [impulsive, setImpulsive] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const submitting = useRef(false);
+
+  const save = async () => {
+    if (submitting.current || !amount || !accountId) return;
+    submitting.current = true; setSaving(true);
+    await sb.from('transactions').insert({
+      account_id: accountId, category_id: categoryId||null,
+      amount: parseFloat(amount), type, date,
+      description: desc, payment_method: method,
+      is_recurring: recurring, is_impulsive: impulsive,
+    });
+    submitting.current = false; setSaving(false);
+    onSave();
+  };
+
+  const cats = categories.filter(c => c.type===type || type==='transfer');
+
+  return <Modal onClose={onClose}>
+    <ModalHeader title="Nueva transacción" onClose={onClose} />
+    <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+      {['expense','income','transfer'].map(t => (
+        <button key={t} onClick={() => setType(t)} style={{
+          flex:1, padding:'7px 0', borderRadius:10, fontSize:13, fontWeight:500, cursor:'pointer',
+          background: type===t ? COLORS_TYPE[t] : '#f9fafb', color: type===t ? '#fff':'#6b7280', border:'none'
+        }}>{LABELS_TYPE[t]}</button>
+      ))}
+    </div>
+    <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+      <Field label="Monto">
+        <Input type="number" step="0.01" placeholder="0.00" value={amount} onChange={e=>setAmount(e.target.value)} />
+      </Field>
+      <Field label="Cuenta">
+        <Select value={accountId} onChange={e=>setAccountId(e.target.value)}>
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name} — {a.currency}</option>)}
+        </Select>
+      </Field>
+      <Field label="Categoría">
+        <Select value={categoryId} onChange={e=>setCategoryId(e.target.value)}>
+          <option value="">Sin categoría</option>
+          {cats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+      </Field>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+        <Field label="Fecha"><Input type="date" value={date} onChange={e=>setDate(e.target.value)} /></Field>
+        <Field label="Método de pago">
+          <Select value={method} onChange={e=>setMethod(e.target.value)}>
+            <option value="cash">Efectivo</option>
+            <option value="debit">Débito</option>
+            <option value="credit">Crédito</option>
+            <option value="transfer">Transferencia</option>
+            <option value="digital">Digital</option>
+            <option value="other">Otro</option>
+          </Select>
+        </Field>
+      </div>
+      <Field label="Descripción (opcional)">
+        <Input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Ej: Supermercado" />
+      </Field>
+      <div style={{ display:'flex', gap:20 }}>
+        <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, cursor:'pointer' }}>
+          <input type="checkbox" checked={recurring} onChange={e=>setRecurring(e.target.checked)} /> Recurrente
+        </label>
+        <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, cursor:'pointer' }}>
+          <input type="checkbox" checked={impulsive} onChange={e=>setImpulsive(e.target.checked)} /> Impulsivo
+        </label>
+      </div>
+    </div>
+    <div style={{ display:'flex', gap:10, marginTop:20 }}>
+      <Btn variant="outline" onClick={onClose} style={{ flex:1 }}>Cancelar</Btn>
+      <button onClick={save} disabled={saving||!amount||!accountId} style={{
+        flex:1, background:COLORS_TYPE[type], color:'#fff', borderRadius:12, padding:'10px 0',
+        fontSize:14, fontWeight:500, border:'none', opacity:(saving||!amount||!accountId)?0.5:1, cursor:'pointer'
+      }}>{saving?'Guardando...':'Registrar'}</button>
+    </div>
+  </Modal>;
+}
+
+function Transacciones() {
+  const [txns, setTxns] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [filter, setFilter] = useState({ type:'all', account:'all', search:'' });
+
+  const load = async () => {
+    setLoading(true);
+    const [t,a,c] = await Promise.all([
+      sb.from('transactions').select('*, accounts(name,currency), categories(name)').order('date',{ascending:false}).limit(200),
+      sb.from('accounts').select('*').eq('is_active',true),
+      sb.from('categories').select('*').order('name'),
+    ]);
+    setTxns(t.data||[]); setAccounts(a.data||[]); setCategories(c.data||[]); setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const filtered = txns.filter(t => {
+    if (filter.type!=='all' && t.type!==filter.type) return false;
+    if (filter.account!=='all' && t.account_id!==filter.account) return false;
+    if (filter.search && !t.description?.toLowerCase().includes(filter.search.toLowerCase())) return false;
+    return true;
+  });
+  const income = txns.filter(t=>t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
+  const expense = txns.filter(t=>t.type==='expense').reduce((s,t)=>s+Number(t.amount),0);
+
+  const handleDelete = async id => {
+    if (!window.confirm('¿Eliminar esta transacción?')) return;
+    await sb.from('transactions').delete().eq('id', id);
+    load();
+  };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize:20, fontWeight:600 }}>Transacciones</h1>
+          <p style={{ fontSize:14, color:'#9ca3af', marginTop:4 }}>Historial completo de movimientos</p>
+        </div>
+        <Btn onClick={() => setShowModal(true)}>+ Nueva transacción</Btn>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
+        <Stat label="Ingresos totales" value={`+$${income.toLocaleString('es-AR',{minimumFractionDigits:2})}`} color="#22c55e" />
+        <Stat label="Gastos totales" value={`-$${expense.toLocaleString('es-AR',{minimumFractionDigits:2})}`} color="#ef4444" />
+        <Stat label="Flujo neto" value={`$${(income-expense).toLocaleString('es-AR',{minimumFractionDigits:2})}`} color={income-expense>=0?'#22c55e':'#ef4444'} />
+      </div>
+      <Card style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+        <Input placeholder="Buscar por descripción..." value={filter.search} onChange={e=>setFilter(f=>({...f,search:e.target.value}))} style={{ flex:'1 1 200px' }} />
+        <Select value={filter.type} onChange={e=>setFilter(f=>({...f,type:e.target.value}))}>
+          <option value="all">Todos los tipos</option>
+          <option value="income">Ingresos</option>
+          <option value="expense">Gastos</option>
+          <option value="transfer">Transferencias</option>
+        </Select>
+        <Select value={filter.account} onChange={e=>setFilter(f=>({...f,account:e.target.value}))}>
+          <option value="all">Todas las cuentas</option>
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </Select>
+      </Card>
+      <Card style={{ padding:0, overflow:'hidden' }}>
+        {loading ? <Loading /> : filtered.length===0 ? (
+          <div style={{ padding:48, textAlign:'center', fontSize:14, color:'#9ca3af' }}>No hay transacciones.</div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ minWidth:700 }}>
+              <thead>
+                <tr style={{ borderBottom:'1px solid #f3f4f6' }}>
+                  {['Fecha','Descripción','Cuenta','Categoría','Método','Monto',''].map((h,i) => (
+                    <th key={i} style={{ textAlign:i===5?'right':'left', fontSize:12, color:'#9ca3af', fontWeight:400, padding:'10px 14px' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(t => (
+                  <tr key={t.id} style={{ borderBottom:'1px solid #f9fafb' }}>
+                    <td style={{ padding:'10px 14px', fontSize:12, color:'#9ca3af', whiteSpace:'nowrap' }}>{fmt(t.date)}</td>
+                    <td style={{ padding:'10px 14px' }}>
+                      <div style={{ fontSize:14, color:'#111827' }}>{t.description||'-'}</div>
+                      <div style={{ display:'flex', gap:4, marginTop:2 }}>
+                        {t.is_recurring && <span style={{ fontSize:10, background:'#eff6ff', color:'#3b82f6', borderRadius:4, padding:'1px 5px' }}>Recurrente</span>}
+                        {t.is_impulsive && <span style={{ fontSize:10, background:'#fff7ed', color:'#f97316', borderRadius:4, padding:'1px 5px' }}>Impulsivo</span>}
+                      </div>
+                    </td>
+                    <td style={{ padding:'10px 14px' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <div style={{ width:6, height:6, borderRadius:'50%', background:COLORS_TYPE[t.type] }} />
+                        <span style={{ fontSize:13, color:'#374151' }}>{t.accounts?.name}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding:'10px 14px' }}><span style={{ fontSize:12, background:'#f9fafb', color:'#6b7280', borderRadius:6, padding:'2px 8px' }}>{t.categories?.name||'-'}</span></td>
+                    <td style={{ padding:'10px 14px', fontSize:12, color:'#9ca3af', textTransform:'capitalize' }}>{t.payment_method}</td>
+                    <td style={{ padding:'10px 14px', textAlign:'right' }}>
+                      <span style={{ fontSize:14, fontWeight:500, color:COLORS_TYPE[t.type] }}>
+                        {t.type==='income'?'+':'-'}${Number(t.amount).toLocaleString('es-AR',{minimumFractionDigits:2})}
+                      </span>
+                      <div style={{ fontSize:11, color:'#9ca3af' }}>{t.accounts?.currency}</div>
+                    </td>
+                    <td style={{ padding:'10px 14px', textAlign:'right' }}>
+                      <button onClick={() => handleDelete(t.id)} style={{ fontSize:11, color:'#f87171', cursor:'pointer', background:'none', border:'none' }}>Eliminar</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      {showModal && <TransactionModal accounts={accounts} categories={categories} onClose={() => setShowModal(false)} onSave={() => { setShowModal(false); load(); }} />}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CUENTAS
+// ════════════════════════════════════════════════════════════════════════════
+function AccountModal({ account, onClose, onSave }) {
+  const [form, setForm] = useState(account || { name:'', type:'bank', balance:'', currency:'USD', description:'', is_active:true, logo_url:'' });
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const handleLogo = async e => {
+    const file = e.target.files[0]; if (!file) return;
+    setUploading(true);
+    const name = `logos/${Date.now()}.${file.name.split('.').pop()}`;
+    const { error } = await sb.storage.from('account-logos').upload(name, file, { upsert:true });
+    if (!error) { const { data } = sb.storage.from('account-logos').getPublicUrl(name); set('logo_url', data.publicUrl); }
+    setUploading(false);
+  };
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    const payload = { name:form.name, type:form.type, balance:parseFloat(form.balance)||0, currency:form.currency, description:form.description, is_active:form.is_active, logo_url:form.logo_url||null };
+    if (account?.id) { await sb.from('accounts').update(payload).eq('id', account.id); }
+    else { await sb.from('accounts').insert(payload); }
+    setLoading(false); onSave();
+  };
+
+  return <Modal onClose={onClose}>
+    <ModalHeader title={account?'Editar cuenta':'Nueva cuenta'} onClose={onClose} />
+    <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+      <Field label="Nombre"><Input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Ej: MercadoPago" /></Field>
+      <Field label="Tipo">
+        <Select value={form.type} onChange={e=>set('type',e.target.value)}>
+          <option value="bank">Banco</option>
+          <option value="cash">Efectivo</option>
+          <option value="digital_wallet">Billetera digital</option>
+          <option value="investment">Inversión / Cripto</option>
+          <option value="other">Otro</option>
+        </Select>
+      </Field>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:10 }}>
+        <Field label="Saldo"><Input type="number" value={form.balance} onChange={e=>set('balance',e.target.value)} placeholder="0.00" /></Field>
+        <Field label="Moneda">
+          <Select value={form.currency} onChange={e=>set('currency',e.target.value)}>
+            <option value="USD">USD</option><option value="ARS">ARS</option>
+            <option value="EUR">EUR</option><option value="USDT">USDT</option>
+            <option value="ETH">ETH</option><option value="BTC">BTC</option>
+          </Select>
+        </Field>
+      </div>
+      <Field label="Descripción (opcional)"><Input value={form.description} onChange={e=>set('description',e.target.value)} placeholder="Ej: Cuenta corporativa" /></Field>
+      <Field label="Logo (opcional)">
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          {form.logo_url && <img src={form.logo_url} alt="logo" style={{ width:36, height:36, borderRadius:8, objectFit:'contain', border:'1px solid #e5e7eb' }} />}
+          <label style={{ cursor:'pointer', fontSize:13, color:'#7c5cfc', border:'1px solid #e0d7ff', borderRadius:8, padding:'6px 12px' }}>
+            {uploading?'Subiendo...':'Subir imagen'}
+            <input type="file" accept="image/*" style={{ display:'none' }} onChange={handleLogo} />
+          </label>
+        </div>
+      </Field>
+      {account && <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:14, cursor:'pointer' }}>
+        <input type="checkbox" checked={form.is_active} onChange={e=>set('is_active',e.target.checked)} /> Cuenta activa
+      </label>}
+    </div>
+    <div style={{ display:'flex', gap:10, marginTop:20 }}>
+      <Btn variant="outline" onClick={onClose} style={{ flex:1 }}>Cancelar</Btn>
+      <Btn onClick={handleSubmit} disabled={loading||!form.name} style={{ flex:1 }}>{loading?'Guardando...':account?'Guardar cambios':'Crear cuenta'}</Btn>
+    </div>
+  </Modal>;
+}
+
+function AccountCard({ account, onEdit, onDelete }) {
+  const color = ACC_COLORS[account.type]||'#7c5cfc';
+  const initials = account.name.slice(0,2).toUpperCase();
+  const del = async () => {
+    if (!window.confirm('¿Eliminar esta cuenta?')) return;
+    await sb.from('accounts').delete().eq('id', account.id);
+    onDelete();
+  };
+  return <Card style={{ display:'flex', flexDirection:'column', gap:8 }}>
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+      <div style={{ width:36, height:36, borderRadius:10, background:color+'18', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
+        {account.logo_url ? <img src={account.logo_url} alt={account.name} style={{ width:28, height:28, objectFit:'contain' }} />
+          : <span style={{ fontSize:12, fontWeight:600, color }}>{initials}</span>}
+      </div>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <span style={{ fontSize:10, color:'#9ca3af', background:'#f9fafb', borderRadius:99, padding:'2px 8px' }}>{ACC_LABELS[account.type]}</span>
+        <button onClick={() => onEdit(account)} style={{ fontSize:11, color:'#7c5cfc', cursor:'pointer', background:'none', border:'none' }}>Editar</button>
+        <button onClick={del} style={{ fontSize:11, color:'#f87171', cursor:'pointer', background:'none', border:'none' }}>Eliminar</button>
+      </div>
+    </div>
+    <div style={{ fontWeight:500, fontSize:14 }}>{account.name}</div>
+    {account.description && <div style={{ fontSize:12, color:'#9ca3af' }}>{account.description}</div>}
+    <div style={{ fontSize:20, fontWeight:600, marginTop:4 }}>
+      {Number(account.balance).toLocaleString('es-AR',{minimumFractionDigits:2})}
+      <span style={{ fontSize:12, color:'#9ca3af', marginLeft:4 }}>{account.currency}</span>
+    </div>
+    <div style={{ fontSize:12, color:'#9ca3af', borderTop:'1px solid #f3f4f6', paddingTop:8 }}>{account.is_active?'Activa':'Inactiva'}</div>
+  </Card>;
+}
+
+function Cuentas() {
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    const { data } = await sb.from('accounts').select('*').order('created_at');
+    setAccounts(data||[]); setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const totalUSD = accounts.filter(a=>a.is_active&&a.currency==='USD').reduce((s,a)=>s+Number(a.balance),0);
+  const activeCount = accounts.filter(a=>a.is_active).length;
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize:20, fontWeight:600 }}>Cuentas</h1>
+          <p style={{ fontSize:14, color:'#9ca3af', marginTop:4 }}>Balance total de todas tus cuentas</p>
+        </div>
+        <Btn onClick={() => setModal('new')}>+ Nueva cuenta</Btn>
+      </div>
+      <div style={{ background:'#7c5cfc', borderRadius:18, padding:20, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <div>
+          <div style={{ fontSize:12, color:'#c4b5fd', marginBottom:4 }}>Balance total consolidado</div>
+          <div style={{ fontSize:28, fontWeight:600, color:'#fff' }}>${totalUSD.toLocaleString('en-US',{minimumFractionDigits:2})} USD</div>
+          <div style={{ fontSize:12, color:'#c4b5fd', marginTop:4 }}>{activeCount} cuentas activas</div>
+        </div>
+      </div>
+      {loading ? <Loading /> : (
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
+          {accounts.filter(a=>a.is_active).map(a => (
+            <AccountCard key={a.id} account={a} onEdit={a=>setModal(a)} onDelete={load} />
+          ))}
+          <div onClick={() => setModal('new')} style={{ background:'#f9fafb', border:'2px dashed #e5e7eb', borderRadius:14, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:8, minHeight:160, cursor:'pointer' }}>
+            <div style={{ width:32, height:32, borderRadius:'50%', background:'#e5e7eb', display:'flex', alignItems:'center', justifyContent:'center', color:'#9ca3af', fontSize:20 }}>+</div>
+            <span style={{ fontSize:13, color:'#9ca3af' }}>Agregar cuenta</span>
+          </div>
+        </div>
+      )}
+      {modal && <AccountModal account={modal==='new'?null:modal} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PRESUPUESTOS
+// ════════════════════════════════════════════════════════════════════════════
+function BudgetModal({ budget, categories, onClose, onSave }) {
+  const [form, setForm] = useState(budget || { category_id:categories[0]?.id||'', amount_planned:'', month:new Date().toISOString().slice(0,7)+'-01' });
+  const [loading, setLoading] = useState(false);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const submit = async () => {
+    setLoading(true);
+    const payload = { category_id:form.category_id, amount_planned:parseFloat(form.amount_planned), month:form.month };
+    if (budget?.id) { await sb.from('budgets').update(payload).eq('id', budget.id); }
+    else { await sb.from('budgets').insert(payload); }
+    setLoading(false); onSave();
+  };
+
+  return <Modal onClose={onClose}>
+    <ModalHeader title={budget?'Editar presupuesto':'Nuevo presupuesto'} onClose={onClose} />
+    <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+      <Field label="Categoría">
+        <Select value={form.category_id} onChange={e=>set('category_id',e.target.value)}>
+          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+      </Field>
+      <Field label="Monto planificado (USD)">
+        <Input type="number" value={form.amount_planned} onChange={e=>set('amount_planned',e.target.value)} placeholder="0.00" />
+      </Field>
+      <Field label="Mes">
+        <Input type="month" value={form.month?.slice(0,7)} onChange={e=>set('month',e.target.value+'-01')} />
+      </Field>
+    </div>
+    <div style={{ display:'flex', gap:10, marginTop:20 }}>
+      <Btn variant="outline" onClick={onClose} style={{ flex:1 }}>Cancelar</Btn>
+      <Btn onClick={submit} disabled={loading||!form.amount_planned} style={{ flex:1 }}>{loading?'Guardando...':budget?'Guardar':'Crear'}</Btn>
+    </div>
+  </Modal>;
+}
+
+function Presupuestos() {
+  const [budgets, setBudgets] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0,7));
+
+  const load = async () => {
+    setLoading(true);
+    const [b,c,t] = await Promise.all([
+      sb.from('budgets').select('*, categories(name)').order('month',{ascending:false}),
+      sb.from('categories').select('*').eq('type','expense').order('name'),
+      sb.from('transactions').select('*').eq('type','expense'),
+    ]);
+    setBudgets(b.data||[]); setCategories(c.data||[]); setTransactions(t.data||[]); setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const monthBudgets = budgets.filter(b => b.month?.startsWith(selectedMonth));
+  const SC = { ok:'#22c55e', warning:'#f59e0b', exceeded:'#ef4444' };
+  const SL = { ok:'OK', warning:'Cerca del límite', exceeded:'Superado' };
+
+  const enriched = monthBudgets.map(b => {
+    const spent = transactions.filter(t=>t.category_id===b.category_id&&t.date?.startsWith(selectedMonth)).reduce((s,t)=>s+Number(t.amount),0);
+    const pct = b.amount_planned>0 ? Math.min((spent/b.amount_planned)*100,100) : 0;
+    const status = spent>=b.amount_planned?'exceeded':spent>=b.amount_planned*0.85?'warning':'ok';
+    return { ...b, spent, pct, status };
+  });
+
+  const totalPlanned = enriched.reduce((s,b)=>s+b.amount_planned,0);
+  const totalSpent = enriched.reduce((s,b)=>s+b.spent,0);
+  const exceeded = enriched.filter(b=>b.status==='exceeded').length;
+  const warnings = enriched.filter(b=>b.status==='warning').length;
+
+  const handleDelete = async id => {
+    if (!window.confirm('¿Eliminar este presupuesto?')) return;
+    await sb.from('budgets').delete().eq('id', id);
+    load();
+  };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize:20, fontWeight:600 }}>Presupuestos</h1>
+          <p style={{ fontSize:14, color:'#9ca3af', marginTop:4 }}>Control de gasto planificado vs real</p>
+        </div>
+        <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+          <Input type="month" value={selectedMonth} onChange={e=>setSelectedMonth(e.target.value)} style={{ padding:'7px 12px' }} />
+          <Btn onClick={() => setModal('new')}>+ Nuevo presupuesto</Btn>
+        </div>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
+        <Stat label="Total planificado" value={`$${totalPlanned.toFixed(2)}`} />
+        <Stat label="Total gastado" value={`$${totalSpent.toFixed(2)}`} color={totalSpent>totalPlanned?'#ef4444':'#22c55e'} />
+        <Stat label="Disponible" value={`$${(totalPlanned-totalSpent).toFixed(2)}`} color={totalPlanned-totalSpent>=0?'#22c55e':'#ef4444'} />
+        <Stat label="Alertas" value={exceeded>0?`${exceeded} superados`:warnings>0?`${warnings} alertas`:'Todo OK'} color={exceeded>0?'#ef4444':warnings>0?'#f59e0b':'#22c55e'} />
+      </div>
+      {loading ? <Loading /> : enriched.length===0 ? (
+        <Card style={{ textAlign:'center', padding:48 }}>
+          <div style={{ fontSize:14, color:'#9ca3af', marginBottom:12 }}>No hay presupuestos para este mes</div>
+          <button onClick={() => setModal('new')} style={{ color:'#7c5cfc', fontSize:14, cursor:'pointer', background:'none', border:'none' }}>+ Crear el primero</button>
+        </Card>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {enriched.map(b => <Card key={b.id}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
+              <div>
+                <div style={{ fontWeight:500, fontSize:14 }}>{b.categories?.name}</div>
+                <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:4 }}>
+                  <div style={{ width:7, height:7, borderRadius:'50%', background:SC[b.status] }} />
+                  <span style={{ fontSize:12, color:SC[b.status] }}>{SL[b.status]}</span>
+                </div>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                <div style={{ textAlign:'right' }}>
+                  <div style={{ fontSize:14, fontWeight:500 }}>${b.spent.toFixed(2)} <span style={{ color:'#9ca3af', fontWeight:400 }}>/ ${Number(b.amount_planned).toFixed(2)}</span></div>
+                  <div style={{ fontSize:12, color:'#9ca3af' }}>{b.pct.toFixed(0)}% ejecutado</div>
+                </div>
+                <button onClick={() => setModal(b)} style={{ fontSize:12, color:'#7c5cfc', cursor:'pointer', background:'none', border:'none' }}>Editar</button>
+                <button onClick={() => handleDelete(b.id)} style={{ fontSize:12, color:'#f87171', cursor:'pointer', background:'none', border:'none' }}>Eliminar</button>
+              </div>
+            </div>
+            <div style={{ height:8, background:'#f3f4f6', borderRadius:99, overflow:'hidden' }}>
+              <div style={{ height:8, width:`${b.pct}%`, background:SC[b.status], borderRadius:99, transition:'width .5s' }} />
+            </div>
+            {b.status==='exceeded' && <div style={{ marginTop:6, fontSize:12, color:'#ef4444' }}>Superaste el presupuesto por ${(b.spent-b.amount_planned).toFixed(2)}</div>}
+            {b.status==='warning' && <div style={{ marginTop:6, fontSize:12, color:'#f59e0b' }}>Te quedan solo ${(b.amount_planned-b.spent).toFixed(2)} disponibles</div>}
+          </Card>)}
+        </div>
+      )}
+      {modal && <BudgetModal budget={modal==='new'?null:modal} categories={categories} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// METAS DE AHORRO
+// ════════════════════════════════════════════════════════════════════════════
+function GoalModal({ goal, onClose, onSave }) {
+  const [form, setForm] = useState(goal || { name:'', target_amount:'', current_amount:'0', target_date:'', status:'active' });
+  const [loading, setLoading] = useState(false);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const submit = async () => {
+    setLoading(true);
+    const payload = { name:form.name, target_amount:parseFloat(form.target_amount), current_amount:parseFloat(form.current_amount)||0, target_date:form.target_date||null, status:form.status };
+    if (goal?.id) { await sb.from('savings_goals').update(payload).eq('id', goal.id); }
+    else { await sb.from('savings_goals').insert(payload); }
+    setLoading(false); onSave();
+  };
+
+  return <Modal onClose={onClose}>
+    <ModalHeader title={goal?'Editar meta':'Nueva meta'} onClose={onClose} />
+    <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+      <Field label="Nombre"><Input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Ej: Viaje a Europa" /></Field>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+        <Field label="Objetivo (USD)"><Input type="number" value={form.target_amount} onChange={e=>set('target_amount',e.target.value)} placeholder="0.00" /></Field>
+        <Field label="Ahorrado"><Input type="number" value={form.current_amount} onChange={e=>set('current_amount',e.target.value)} placeholder="0.00" /></Field>
+      </div>
+      <Field label="Fecha objetivo"><Input type="date" value={form.target_date||''} onChange={e=>set('target_date',e.target.value)} /></Field>
+      {goal && <Field label="Estado">
+        <Select value={form.status} onChange={e=>set('status',e.target.value)}>
+          <option value="active">Activa</option>
+          <option value="completed">Completada</option>
+          <option value="cancelled">Cancelada</option>
+        </Select>
+      </Field>}
+    </div>
+    <div style={{ display:'flex', gap:10, marginTop:20 }}>
+      <Btn variant="outline" onClick={onClose} style={{ flex:1 }}>Cancelar</Btn>
+      <Btn onClick={submit} disabled={loading||!form.name||!form.target_amount} style={{ flex:1 }}>{loading?'Guardando...':goal?'Guardar':'Crear meta'}</Btn>
+    </div>
+  </Modal>;
+}
+
+function AddSavingsModal({ goal, onClose, onSave }) {
+  const [amount, setAmount] = useState('');
+  const [loading, setLoading] = useState(false);
+  const submit = async () => {
+    setLoading(true);
+    const newAmt = Number(goal.current_amount) + parseFloat(amount);
+    const status = newAmt >= Number(goal.target_amount) ? 'completed':'active';
+    await sb.from('savings_goals').update({ current_amount:newAmt, status }).eq('id', goal.id);
+    setLoading(false); onSave();
+  };
+  return <Modal onClose={onClose}>
+    <ModalHeader title="Agregar ahorro" onClose={onClose} />
+    <p style={{ fontSize:14, color:'#6b7280', marginBottom:12 }}>Meta: <strong style={{ color:'#111827' }}>{goal.name}</strong></p>
+    <Field label="Monto (USD)"><Input type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0.00" autoFocus /></Field>
+    <div style={{ display:'flex', gap:10, marginTop:20 }}>
+      <Btn variant="outline" onClick={onClose} style={{ flex:1 }}>Cancelar</Btn>
+      <Btn variant="green" onClick={submit} disabled={loading||!amount} style={{ flex:1 }}>{loading?'Guardando...':'+ Agregar'}</Btn>
+    </div>
+  </Modal>;
+}
+
+function Metas() {
+  const [goals, setGoals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [addSavings, setAddSavings] = useState(null);
+  const [filter, setFilter] = useState('active');
+
+  const load = async () => {
+    setLoading(true);
+    const { data } = await sb.from('savings_goals').select('*').order('created_at',{ascending:false});
+    setGoals(data||[]); setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleDelete = async id => {
+    if (!window.confirm('¿Eliminar esta meta?')) return;
+    await sb.from('savings_goals').delete().eq('id', id);
+    load();
+  };
+
+  const filtered = goals.filter(g => filter==='all' ? true : g.status===filter);
+  const totalGoal = goals.filter(g=>g.status==='active').reduce((s,g)=>s+Number(g.target_amount),0);
+  const totalSaved = goals.filter(g=>g.status==='active').reduce((s,g)=>s+Number(g.current_amount),0);
+  const completed = goals.filter(g=>g.status==='completed').length;
+  const SC = { active:'#7c5cfc', completed:'#22c55e', cancelled:'#9ca3af' };
+  const SL = { active:'Activa', completed:'Completada', cancelled:'Cancelada' };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize:20, fontWeight:600 }}>Metas de ahorro</h1>
+          <p style={{ fontSize:14, color:'#9ca3af', marginTop:4 }}>Tus objetivos financieros</p>
+        </div>
+        <Btn onClick={() => setModal('new')}>+ Nueva meta</Btn>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12 }}>
+        <Stat label="Total por alcanzar" value={`$${totalGoal.toLocaleString('en-US',{minimumFractionDigits:2})}`} sub="en metas activas" />
+        <Stat label="Total ahorrado" value={`$${totalSaved.toLocaleString('en-US',{minimumFractionDigits:2})}`} color="#7c5cfc" sub={`${totalGoal>0?((totalSaved/totalGoal)*100).toFixed(0):0}% del total`} />
+        <Stat label="Metas completadas" value={completed} color="#22c55e" sub={`de ${goals.length} totales`} />
+      </div>
+      <div style={{ display:'flex', gap:8 }}>
+        {[['active','Activas'],['completed','Completadas'],['all','Todas']].map(([v,l]) => (
+          <button key={v} onClick={() => setFilter(v)} style={{ padding:'6px 14px', borderRadius:99, fontSize:13, fontWeight:500, cursor:'pointer', background:filter===v?'#7c5cfc':'#f3f4f6', color:filter===v?'#fff':'#6b7280', border:'none' }}>{l}</button>
+        ))}
+      </div>
+      {loading ? <Loading /> : filtered.length===0 ? (
+        <Card style={{ textAlign:'center', padding:48 }}>
+          <div style={{ fontSize:14, color:'#9ca3af', marginBottom:12 }}>No hay metas</div>
+          <button onClick={() => setModal('new')} style={{ color:'#7c5cfc', fontSize:14, cursor:'pointer', background:'none', border:'none' }}>+ Crear una meta</button>
+        </Card>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {filtered.map(g => {
+            const pct = g.target_amount>0 ? Math.min((Number(g.current_amount)/Number(g.target_amount))*100,100) : 0;
+            const remaining = Number(g.target_amount)-Number(g.current_amount);
+            const daysLeft = g.target_date ? Math.max(0, Math.ceil((new Date(g.target_date)-new Date())/86400000)) : null;
+            const c = SC[g.status]||'#7c5cfc';
+            return <Card key={g.id}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
+                <div>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <span style={{ fontWeight:500, fontSize:14 }}>{g.name}</span>
+                    <span style={{ fontSize:10, borderRadius:99, padding:'2px 8px', background:c+'18', color:c }}>{SL[g.status]}</span>
+                  </div>
+                  {g.target_date && daysLeft!==null && <div style={{ fontSize:12, color:'#9ca3af', marginTop:2 }}>
+                    {daysLeft===0?'Vence hoy':`${daysLeft} días restantes`} · {new Date(g.target_date).toLocaleDateString('es-AR')}
+                  </div>}
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                  <div style={{ textAlign:'right' }}>
+                    <div style={{ fontSize:14, fontWeight:500 }}>${Number(g.current_amount).toFixed(2)} <span style={{ color:'#9ca3af', fontWeight:400 }}>/ ${Number(g.target_amount).toFixed(2)}</span></div>
+                    <div style={{ fontSize:12, color:'#9ca3af' }}>{pct.toFixed(0)}% completado</div>
+                  </div>
+                  {g.status==='active' && <button onClick={() => setAddSavings(g)} style={{ fontSize:11, background:'#f0fdf4', color:'#22c55e', borderRadius:8, padding:'4px 8px', border:'none', cursor:'pointer', fontWeight:500 }}>+ Agregar</button>}
+                  <button onClick={() => setModal(g)} style={{ fontSize:11, color:'#7c5cfc', cursor:'pointer', background:'none', border:'none' }}>Editar</button>
+                  <button onClick={() => handleDelete(g.id)} style={{ fontSize:11, color:'#f87171', cursor:'pointer', background:'none', border:'none' }}>Eliminar</button>
+                </div>
+              </div>
+              <div style={{ height:8, background:'#f3f4f6', borderRadius:99, overflow:'hidden' }}>
+                <div style={{ height:8, width:`${pct}%`, background:c, borderRadius:99, transition:'width .5s' }} />
+              </div>
+              {g.status==='active' && remaining>0 && <div style={{ marginTop:6, fontSize:12, color:'#9ca3af' }}>Faltan ${remaining.toFixed(2)} para completar</div>}
+              {g.status==='completed' && <div style={{ marginTop:6, fontSize:12, color:'#22c55e' }}>Meta alcanzada 🎉</div>}
+            </Card>;
+          })}
+        </div>
+      )}
+      {modal && <GoalModal goal={modal==='new'?null:modal} onClose={() => setModal(null)} onSave={() => { setModal(null); load(); }} />}
+      {addSavings && <AddSavingsModal goal={addSavings} onClose={() => setAddSavings(null)} onSave={() => { setAddSavings(null); load(); }} />}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ASISTENTE IA
+// ════════════════════════════════════════════════════════════════════════════
+function Asistente() {
+  const [messages, setMessages] = useState([{ role:'assistant', content:'¡Hola! Soy tu asistente financiero personal. Podés preguntarme sobre tus gastos, ingresos, presupuestos, metas de ahorro o pedirme consejos financieros.' }]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [context, setContext] = useState(null);
+  const messagesEndRef = useRef(null);
+  const [apiKey, setApiKey] = useState(getAnthropicKey());
+  const [keyInput, setKeyInput] = useState('');
+  const saveKey = () => { if (!keyInput.trim()) return; localStorage.setItem('anthropic_api_key', keyInput.trim()); setApiKey(keyInput.trim()); setKeyInput(''); };
+  const clearKey = () => { localStorage.removeItem('anthropic_api_key'); setApiKey(''); };
+
+  if (!apiKey) return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div><h1 style={{ fontSize:20, fontWeight:600 }}>Asistente IA</h1><p style={{ fontSize:14, color:'#9ca3af', marginTop:4 }}>Configuración requerida</p></div>
+      <div style={{ background:'#fff', border:' 1px solid #f0f0f2', borderRadius:14, padding:24, maxWidth:500 }}>
+        <div style={{ fontWeight:600, fontSize:15, marginBottom:8 }}>🔑 Ingresá tu Anthropic API Key</div>
+        <p style={{ fontSize:13, color:'#6b7280', marginBottom:16, lineHeight:1.6 }}>La key se guarda solo en tu browser (localStorage), nunca en el código ni en ningún servidor.<br/><br/>Obtené la tuya en: <a href="https://console.anthropic.com/settings/keys" target="_blank" style={{ color:'#7c5cfc' }}>console.anthropic.com</a></p>
+        <div style={{ display:'flex', gap:10 }}>
+          <input type="password" placeholder="sk-ant-api03-..." value={keyInput} onChange={e=>setKeyInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&saveKey()} style={{ flex:1, border:'1px solid #e5e7eb', borderRadius:10, padding:'8px 12px', fontSize:14, outline:'none', color:'#111827', background:'#fff' }} />
+          <button onClick={saveKey} disabled={!keyInput.trim()} style={{ background:'#7c5cfc', color:'#fff', borderRadius:12, padding:'10px 18px', fontSize:14, fontWeight:500, border:'none', cursor:'pointer', opacity:keyInput.trim()?1:0.5 }}>Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [messages]);
+
+  useEffect(() => {
+    (async () => {
+      const thisMonth = new Date().toISOString().slice(0,7);
+      const [t,a,c,b,g] = await Promise.all([
+        sb.from('transactions').select('*, accounts(name), categories(name)').order('date',{ascending:false}).limit(50),
+        sb.from('accounts').select('*').eq('is_active',true),
+        sb.from('categories').select('*'),
+        sb.from('budgets').select('*, categories(name)').gte('month', thisMonth+'-01'),
+        sb.from('savings_goals').select('*').eq('status','active'),
+      ]);
+      const txns = t.data||[];
+      const income = txns.filter(x=>x.type==='income'&&x.date?.startsWith(thisMonth)).reduce((s,x)=>s+Number(x.amount),0);
+      const expenses = txns.filter(x=>x.type==='expense'&&x.date?.startsWith(thisMonth)).reduce((s,x)=>s+Number(x.amount),0);
+      setContext({ accounts:a.data, transactions:txns, budgets:b.data, goals:g.data, income, expenses, thisMonth });
+    })();
+  }, []);
+
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
+    const userMsg = { role:'user', content:input };
+    const newMsgs = [...messages, userMsg];
+    setMessages(newMsgs); setInput(''); setLoading(true);
+
+    const systemPrompt = context ? `Sos un asistente financiero personal experto. Respondé siempre en español, de forma clara y concisa.
+
+Datos financieros del usuario:
+- Mes actual: ${context.thisMonth}
+- Ingresos del mes: $${context.income?.toFixed(2)} USD
+- Gastos del mes: $${context.expenses?.toFixed(2)} USD
+- Flujo neto: $${(context.income-context.expenses)?.toFixed(2)} USD
+- Cuentas activas: ${context.accounts?.map(a=>`${a.name} (${a.balance} ${a.currency})`).join(', ')}
+- Últimas transacciones: ${context.transactions?.slice(0,10).map(t=>`${t.date}: ${t.type==='income'?'+':'-'}$${t.amount} - ${t.description||'Sin desc'} (${t.categories?.name||'Sin cat'})`).join('; ')}
+- Presupuestos activos: ${context.budgets?.map(b=>`${b.categories?.name}: $${b.amount_planned} planificado`).join(', ')||'Ninguno'}
+- Metas de ahorro: ${context.goals?.map(g=>`${g.name}: $${g.current_amount}/$${g.target_amount}`).join(', ')||'Ninguna'}
+
+Ayudá al usuario con preguntas sobre sus finanzas, dá consejos basados en sus datos reales.` : 'Sos un asistente financiero personal. Respondé en español.';
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method:'POST',
+        headers: { 'Content-Type':'application/json', 'x-api-key':getAnthropicKey(), 'anthropic-version':'2023-06-01', 'anthropic-beta': 'cors-support-1' },
+        body: JSON.stringify({ model:'claude-haiku-4-5-20251001', max_tokens:1000, system:systemPrompt, messages: newMsgs.map(m=>({role:m.role,content:m.content})) })
+      });
+      const data = await res.json();
+      const reply = data.content?.[0]?.text || 'No pude obtener una respuesta. Intentá de nuevo.';
+      setMessages(m => [...m, { role:'assistant', content:reply }]);
+    } catch(e) {
+      setMessages(m => [...m, { role:'assistant', content:'Hubo un error al contactar al asistente. Verificá tu conexión.' }]);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16, height:'calc(100vh - 120px)' }}>
+      <div>
+        <h1 style={{ fontSize:20, fontWeight:600 }}>Asistente IA</h1>
+        <p style={{ fontSize:14, color:'#9ca3af', marginTop:4 }}>Tu asesor financiero personal</p>
+      </div>
+      <Card style={{ flex:1, display:'flex', flexDirection:'column', padding:0, overflow:'hidden' }}>
+        <div style={{ flex:1, overflowY:'auto', padding:20, display:'flex', flexDirection:'column', gap:12 }}>
+          {messages.map((m,i) => (
+            <div key={i} style={{ display:'flex', justifyContent:m.role==='user'?'flex-end':'flex-start' }}>
+              <div style={{
+                maxWidth:'75%', padding:'10px 14px', borderRadius:m.role==='user'?'18px 18px 4px 18px':'18px 18px 18px 4px',
+                background:m.role==='user'?'#7c5cfc':'#f3f4f6', color:m.role==='user'?'#fff':'#111827',
+                fontSize:14, lineHeight:1.5, whiteSpace:'pre-wrap'
+              }}>{m.content}</div>
+            </div>
+          ))}
+          {loading && <div style={{ display:'flex', justifyContent:'flex-start' }}>
+            <div style={{ background:'#f3f4f6', borderRadius:'18px 18px 18px 4px', padding:'10px 16px' }}>
+              <div style={{ display:'flex', gap:4 }}>
+                {[0,1,2].map(i => <div key={i} style={{ width:6, height:6, borderRadius:'50%', background:'#9ca3af', animation:'bounce 1.2s infinite', animationDelay:`${i*0.2}s` }} />)}
+              </div>
+            </div>
+          </div>}
+          <div ref={messagesEndRef} />
+        </div>
+        <div style={{ padding:16, borderTop:'1px solid #f3f4f6', display:'flex', gap:10 }}>
+          <Input
+            value={input} onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendMessage(); } }}
+            placeholder="Preguntá sobre tus finanzas..." style={{ flex:1 }}
+          />
+          <Btn onClick={sendMessage} disabled={loading||!input.trim()} style={{ padding:'10px 20px' }}>Enviar</Btn>
+        </div>
+      </Card>
+      <style>{`@keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }`}</style>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN
+// ════════════════════════════════════════════════════════════════════════════
+function Configuracion() {
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ name:'', type:'expense' });
+  const [saving, setSaving] = useState(false);
+  const TC = { expense:'#ef4444', income:'#22c55e', transfer:'#7c5cfc' };
+  const TL = { expense:'Gastos', income:'Ingresos', transfer:'Transferencias' };
+
+  const load = async () => {
+    setLoading(true);
+    const { data } = await sb.from('categories').select('*').order('type').order('name');
+    setCategories(data||[]); setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleAdd = async () => {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    await sb.from('categories').insert({ name:form.name.trim(), type:form.type });
+    setForm({ name:'', type:'expense' }); setSaving(false); load();
+  };
+
+  const handleDelete = async id => {
+    await sb.from('categories').delete().eq('id', id);
+    load();
+  };
+
+  const grouped = {
+    expense: categories.filter(c=>c.type==='expense'),
+    income: categories.filter(c=>c.type==='income'),
+    transfer: categories.filter(c=>c.type==='transfer'),
+  };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <div>
+        <h1 style={{ fontSize:20, fontWeight:600 }}>Configuración</h1>
+        <p style={{ fontSize:14, color:'#9ca3af', marginTop:4 }}>Administrá las categorías de tus transacciones</p>
+      </div>
+      <Card>
+        <div style={{ fontWeight:500, fontSize:14, marginBottom:16 }}>Nueva categoría</div>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+          <Input
+            placeholder="Nombre de la categoría" value={form.name}
+            onChange={e=>setForm(f=>({...f,name:e.target.value}))}
+            onKeyDown={e=>e.key==='Enter'&&handleAdd()}
+            style={{ flex:'1 1 200px' }}
+          />
+          <Select value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
+            <option value="expense">Gasto</option>
+            <option value="income">Ingreso</option>
+            <option value="transfer">Transferencia</option>
+          </Select>
+          <Btn onClick={handleAdd} disabled={saving||!form.name.trim()}>{saving?'Guardando...':'+ Agregar'}</Btn>
+        </div>
+      </Card>
+      {loading ? <Loading /> : (
+        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          {['expense','income','transfer'].map(type => grouped[type].length>0 && (
+            <Card key={type} style={{ padding:0, overflow:'hidden' }}>
+              <div style={{ padding:'12px 20px', borderBottom:'1px solid #f3f4f6', display:'flex', alignItems:'center', gap:8 }}>
+                <div style={{ width:7, height:7, borderRadius:'50%', background:TC[type] }} />
+                <span style={{ fontWeight:500, fontSize:14 }}>{TL[type]}</span>
+                <span style={{ fontSize:12, color:'#9ca3af' }}>({grouped[type].length})</span>
+              </div>
+              <div>
+                {grouped[type].map(cat => (
+                  <div key={cat.id} style={{ padding:'11px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid #f9fafb' }}>
+                    <span style={{ fontSize:14, color:'#374151' }}>{cat.name}</span>
+                    <button onClick={() => handleDelete(cat.id)} style={{ fontSize:12, color:'#f87171', cursor:'pointer', background:'none', border:'none' }}>Eliminar</button>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// LAYOUT / NAV
+// ════════════════════════════════════════════════════════════════════════════
+const NAV = [
+  { id:'dashboard', label:'Dashboard', icon:'▦' },
+  { id:'transacciones', label:'Transacciones', icon:'↕' },
+  { id:'cuentas', label:'Cuentas', icon:'◉' },
+  { id:'presupuestos', label:'Presupuestos', icon:'◈' },
+  { id:'metas', label:'Metas', icon:'◎' },
+  { id:'asistente', label:'Asistente IA', icon:'✦' },
+  { id:'configuracion', label:'Configuración', icon:'⚙' },
+];
+
+const PAGES = {
+  dashboard: Dashboard,
+  transacciones: Transacciones,
+  cuentas: Cuentas,
+  presupuestos: Presupuestos,
+  metas: Metas,
+  asistente: Asistente,
+  configuracion: Configuracion,
+};
+
+function App() {
+  const [page, setPage] = useState('dashboard');
+  const Page = PAGES[page] || Dashboard;
+
+  return (
+    <div style={{ display:'flex', minHeight:'100vh' }}>
+      {/* Sidebar */}
+      <aside style={{
+        width:220, background:'#fff', borderRight:'1px solid #f0f0f2',
+        display:'flex', flexDirection:'column', position:'fixed', top:0, left:0, bottom:0, zIndex:100
+      }}>
+        <div style={{ padding:'24px 20px 20px' }}>
+          <div style={{ fontWeight:700, fontSize:17, color:'#111827', letterSpacing:'-0.5px' }}>💰 Mis Finanzas</div>
+        </div>
+        <nav style={{ flex:1, padding:'0 10px', display:'flex', flexDirection:'column', gap:2 }}>
+          {NAV.map(n => (
+            <button key={n.id} onClick={() => setPage(n.id)} style={{
+              display:'flex', alignItems:'center', gap:10, padding:'9px 12px', borderRadius:10,
+              background: page===n.id ? '#f3f0ff':'transparent',
+              color: page===n.id ? '#7c5cfc':'#374151',
+              fontWeight: page===n.id ? 500:400,
+              fontSize:14, width:'100%', textAlign:'left', cursor:'pointer', border:'none',
+              transition:'background .15s'
+            }}>
+              <span style={{ fontSize:15, opacity:page===n.id?1:0.5 }}>{n.icon}</span>
+              {n.label}
+            </button>
+          ))}
+        </nav>
+        <div style={{ padding:'16px 20px', borderTop:'1px solid #f3f4f6', fontSize:12, color:'#9ca3af' }}>
+          Mis Finanzas v2.0
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <main style={{ marginLeft:220, flex:1, padding:28, minHeight:'100vh' }}>
+        <Page />
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
