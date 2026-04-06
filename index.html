@@ -543,13 +543,48 @@ function Dashboard(){
               </div>
             </div>
 
-            {/* Mensaje contextual */}
-            <div style={{marginTop:10,fontSize:12,color:'var(--text2)',background:'var(--surface2)',borderRadius:8,padding:'8px 12px',lineHeight:1.5}}>
-              {projectedBalance >= 0
-                ? `A este ritmo vas a terminar el mes con ~$${money(projectedBalance,0)} en tus cuentas. ${avgVarPerDay>0?`Estás gastando $${money(avgVarPerDay,0)} por día en gastos variables.`:''}`
-                : `⚠️ A este ritmo tus gastos superarían tu balance actual. Considerá reducir gastos variables (~$${money(avgVarPerDay,0)}/día).`
+            {/* Evaluación vs meta de ahorro y presupuesto */}
+            {(()=>{
+              // Cuánto necesita ahorrar este mes para cumplir la meta
+              // (lo calculamos si hay ingresos, sino mostramos solo ritmo de gastos)
+              const totalBudget = budgets.reduce((s,b) => s+Number(b.amount_planned), 0);
+              const projectedOverBudget = totalProjectedExp > totalBudget && totalBudget > 0;
+              const msgs = [];
+
+              // Mensaje sobre ritmo de gastos vs presupuesto total
+              if(totalBudget > 0){
+                const budgetUsedPct = (totalProjectedExp / totalBudget) * 100;
+                if(budgetUsedPct > 110) msgs.push({ icon:'🔴', txt:`A este ritmo vas a gastar $${money(totalProjectedExp,0)} — un ${(budgetUsedPct-100).toFixed(0)}% más que tu presupuesto total de $${money(totalBudget,0)}.` });
+                else if(budgetUsedPct > 90) msgs.push({ icon:'🟡', txt:`Proyección ajustada: $${money(totalProjectedExp,0)} vs presupuesto $${money(totalBudget,0)}. Margen muy pequeño.` });
+                else msgs.push({ icon:'✅', txt:`Proyección de gastos $${money(totalProjectedExp,0)} dentro del presupuesto de $${money(totalBudget,0)}.` });
               }
-            </div>
+
+              // Mensaje sobre meta de ahorro (solo si hay ingresos)
+              if(income > 0){
+                const netAfterProjected = income - totalProjectedExp;
+                msgs.push({ icon: netAfterProjected >= 0 ? '💰' : '⚠️',
+                  txt: netAfterProjected >= 0
+                    ? `Con tus ingresos actuales ($${money(income,0)}) y gastos proyectados ($${money(totalProjectedExp,0)}), podrías ahorrar ~$${money(netAfterProjected,0)} este mes.`
+                    : `Tus gastos proyectados ($${money(totalProjectedExp,0)}) superan tus ingresos registrados ($${money(income,0)}). Revisá tu ritmo.`
+                });
+              } else {
+                msgs.push({ icon:'ℹ️', txt:`Registrá tus ingresos para ver si vas a poder cumplir tu meta de ahorro este mes.` });
+              }
+
+              // Ritmo diario
+              if(avgVarPerDay > 0) msgs.push({ icon:'📌', txt:`Ritmo actual: $${money(avgVarPerDay,0)}/día en gastos variables.` });
+
+              return(
+                <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:5}}>
+                  {msgs.map((m,i)=>(
+                    <div key={i} style={{fontSize:12,color:'var(--text2)',background:'var(--surface2)',borderRadius:8,padding:'7px 12px',lineHeight:1.5,display:'flex',gap:7,alignItems:'flex-start'}}>
+                      <span style={{flexShrink:0}}>{m.icon}</span>
+                      <span>{m.txt}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </Card>
         );
       })()}
