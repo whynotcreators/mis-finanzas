@@ -517,7 +517,7 @@ function TxModal({accounts,categories,onClose,onSave}){
   const [accountId,setAccountId]=useState(accounts[0]?.id||'');
   const [categoryId,setCategoryId]=useState('');
   const [date,setDate]=useState(localToday());
-  const [method,setMethod]=useState('cash');
+  const [method,setMethod]=useState('digital');
   const [desc,setDesc]=useState('');
   const [recurring,setRecurring]=useState(false);
   const [impulsive,setImpulsive]=useState(false);
@@ -554,9 +554,7 @@ function TxModal({accounts,categories,onClose,onSave}){
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <Field label="Fecha"><Input type="date" value={date} onChange={e=>setDate(e.target.value)}/></Field>
           <Field label="Método"><Select value={method} onChange={e=>setMethod(e.target.value)}>
-            <option value="cash">Efectivo</option><option value="debit">Débito</option>
-            <option value="credit">Crédito</option><option value="transfer">Transferencia</option>
-            <option value="digital">Digital</option><option value="other">Otro</option>
+            <option value="digital">Digital (saldo en cuenta)</option>
           </Select></Field>
         </div>
         <Field label="Descripción (opcional)"><Input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Ej: Supermercado"/></Field>
