@@ -380,7 +380,7 @@ function StatCard({label,value,cents,trend,trendUp}){
         </div>
       </div>
       <div style={{fontSize:24,fontWeight:600,color:'var(--text)',letterSpacing:'-0.5px',lineHeight:1}}>
-        <Priv>{value}</Priv><span style={{fontSize:14,fontWeight:400,color:'var(--text3)'}}><Priv chars={2}>.{cents||'00'}</Priv></span>
+        <Priv>{value}</Priv><span style={{fontSize:14,fontWeight:400,color:'var(--text3)'}}><Priv>.{cents||'00'}</Priv></span>
       </div>
       {trend&&<div style={{marginTop:8,display:'flex',alignItems:'center',gap:4}}>
         <span style={{fontSize:11,fontWeight:600,color:trendUp?'var(--success)':'var(--danger)',background:trendUp?'var(--success-bg)':'var(--danger-bg)',borderRadius:99,padding:'2px 7px',display:'inline-flex',alignItems:'center',gap:2}}>
@@ -568,9 +568,9 @@ function Dashboard(){
                     {a.level==='exceeded'?`Superaste el presupuesto de ${a.name}`:`Llegaste al ${a.pct.toFixed(0)}% del presupuesto de ${a.name}`}
                   </div>
                   <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>
-                    Gastaste <strong><Priv>${money(a.spent,0)}</Priv></strong> de <strong><Priv>${money(a.planned,0)}</Priv></strong><Priv> planificados
+                    Gastaste <strong><Priv>${money(a.spent,0)}</Priv></strong> de <strong><Priv>${money(a.planned,0)}</Priv></strong> planificados
                     {a.level==='exceeded'&&` — superaste por $${money(a.spent-a.planned,0)}`}
-                  </Priv></div>
+                  </div>
                 </div>
                 <div style={{fontSize:13,fontWeight:800,color:a.level==='exceeded'?'var(--danger)':'var(--warning)',flexShrink:0}}>{a.pct.toFixed(0)}%</div>
               </div>
