@@ -328,8 +328,8 @@ function Dashboard(){
   const totalUSD=accs.filter(a=>a.currency==='USD').reduce((s,a)=>s+Number(a.balance),0);
   const fmtSplit=n=>{const s=money(n,2).split(',');return{int:s[0],dec:s[1]||'00'};};
 
-  const last6=Array.from({length:6},(_,i)=>{
-    const d=new Date();d.setMonth(d.getMonth()-(5-i));
+  const last6=Array.from({length:3},(_,i)=>{
+    const d=new Date();d.setMonth(d.getMonth()-(2-i));
     const key=d.toISOString().slice(0,7);
     const label=d.toLocaleString('es',{month:'short'});
     const inc=txns.filter(t=>t.date?.startsWith(key)&&t.type==='income').reduce((s,t)=>s+Number(t.amount),0);
@@ -1168,7 +1168,7 @@ function AnalyticsChart({data}){
   );
 
   const maxVal=Math.max(...data.flatMap(d=>[d.income,d.expenses]),1);
-  const chartH=160;
+  const chartH=220;
   const barGroupW=100/data.length;
   const barW=barGroupW*0.32;
 
