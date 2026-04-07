@@ -2851,11 +2851,11 @@ function Calendario(){
 // ══════════════════════════════════════════════════════════════════════════
 // GYM
 // ══════════════════════════════════════════════════════════════════════════
-const GYM_OBLIGATORY=[1,2,3,4,5]; // Lun-Vie obligatorio
+const GYM_OBLIGATORY=[1,2,3,4,5]; // Lun-Vie
 
 function Gym(){
-  const [gymLogs,setGymLogs]=useState({});        // {date: {attended,note}}
-  const [suppLogs,setSuppLogs]=useState({});       // {date: {suppName: taken}}
+  const [gymLogs,setGymLogs]=useState({});
+  const [suppLogs,setSuppLogs]=useState({});
   const [supplements,setSupplements]=useState([]);
   const [loading,setLoading]=useState(true);
   const [viewMonth,setViewMonth]=useState(()=>{const d=new Date();return{year:d.getFullYear(),month:d.getMonth()};});
@@ -2864,6 +2864,9 @@ function Gym(){
   const today=localToday();
   const {year,month}=viewMonth;
   const monthKey=`${year}-${String(month+1).padStart(2,'0')}`;
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const firstDay=new Date(year,month,1).getDay();
+  const DAYS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 
   const load=async()=>{
     const [gl,sl,sp]=await Promise.all([
@@ -2871,11 +2874,9 @@ function Gym(){
       sb.from('supplement_logs').select('*'),
       sb.from('supplements').select('*').eq('active',true).order('name'),
     ]);
-    // Index gym logs by date
     const glMap={};
-    (gl.data||[]).forEach(l=>{glMap[l.date]={attended:l.attended,note:l.note,id:l.id};});
+    (gl.data||[]).forEach(l=>{glMap[l.date]={attended:l.attended,id:l.id};});
     setGymLogs(glMap);
-    // Index supplement logs by date→name
     const slMap={};
     (sl.data||[]).forEach(l=>{
       if(!slMap[l.date])slMap[l.date]={};
@@ -2887,32 +2888,25 @@ function Gym(){
   };
   useEffect(()=>{load();},[]);
 
-  // Toggle gym attendance for a day
   const toggleGym=async(dateStr)=>{
     const existing=gymLogs[dateStr];
     if(existing){
       if(existing.attended){
-        // Was attended → mark as missed
         await sb.from('gym_logs').update({attended:false}).eq('id',existing.id);
       } else {
-        // Was missed → delete (unmarked)
         await sb.from('gym_logs').delete().eq('id',existing.id);
       }
     } else {
-      // Not logged → mark as attended
       await sb.from('gym_logs').insert({date:dateStr,attended:true});
     }
     load();
   };
 
-  // Toggle supplement for today
   const toggleSupp=async(dateStr,suppName)=>{
     const current=suppLogs[dateStr]?.[suppName];
-    if(current===undefined||current===false){
-      // Upsert as taken
+    if(!current){
       await sb.from('supplement_logs').upsert({date:dateStr,supplement_name:suppName,taken:true},{onConflict:'date,supplement_name'});
     } else {
-      // Was taken → remove
       await sb.from('supplement_logs').delete().eq('date',dateStr).eq('supplement_name',suppName);
     }
     load();
@@ -2931,70 +2925,58 @@ function Gym(){
     load();
   };
 
-  // ── CALENDAR HELPERS ──────────────────────────────────────────────────
-  const firstDay=new Date(year,month,1).getDay();
-  const daysInMonth=new Date(year,month+1,0).getDate();
-  const DAYS=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-
-  const prevMonth=()=>setViewMonth(({year,month})=>month===0?{year:year-1,month:11}:{year,month:month-1});
-  const nextMonth=()=>setViewMonth(({year,month})=>month===11?{year:year+1,month:0}:{year,month:month+1});
-  const monthLabel=new Date(year,month,1).toLocaleString('es',{month:'long',year:'numeric'});
-
   // ── STATS ─────────────────────────────────────────────────────────────
   const monthDays=Array.from({length:daysInMonth},(_,i)=>{
     const d=i+1;
     const dateStr=`${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dow=new Date(dateStr+'T12:00').getDay();
-    const isObligatory=GYM_OBLIGATORY.includes(dow);
-    const isPast=dateStr<=today;
-    const log=gymLogs[dateStr];
-    return{dateStr,dow,isObligatory,isPast,log};
+    return{dateStr,dow,isObl:GYM_OBLIGATORY.includes(dow),isPast:dateStr<=today,log:gymLogs[dateStr]};
   });
 
-  const obligatoryPast=monthDays.filter(d=>d.isObligatory&&d.isPast);
-  const attended=monthDays.filter(d=>d.isPast&&d.log?.attended);
-  const missed=obligatoryPast.filter(d=>!d.log?.attended);
-  const extras=attended.filter(d=>!d.isObligatory); // fue en día opcional
-  const attendanceRate=obligatoryPast.length>0?Math.round((obligatoryPast.filter(d=>d.log?.attended).length/obligatoryPast.length)*100):0;
+  const pastDays=monthDays.filter(d=>d.isPast);
+  const attended=pastDays.filter(d=>d.log?.attended).length;
+  const obligatoryPast=pastDays.filter(d=>d.isObl);
+  const missed=obligatoryPast.filter(d=>!d.log?.attended).length;
+  const extras=pastDays.filter(d=>!d.isObl&&d.log?.attended).length;
 
-  // Racha actual (días consecutivos asistidos hasta hoy)
+  // Racha: días consecutivos yendo (sin importar si era obligatorio o no)
   const calcStreak=()=>{
     let streak=0;
     const d=new Date(today+'T12:00');
-    while(true){
+    for(let i=0;i<90;i++){
       const ds=d.toISOString().slice(0,10);
       const dow=d.getDay();
       const isObl=GYM_OBLIGATORY.includes(dow);
       const log=gymLogs[ds];
-      if(ds>today)break;
       if(isObl){
         if(log?.attended) streak++;
-        else if(ds<today) break; // faltó en día obligatorio → rompe racha
+        else if(ds<=today){break;}
       }
-      // día opcional: si fue suma, si no fue no rompe
-      if(!isObl&&log?.attended) streak++;
       d.setDate(d.getDate()-1);
-      if(streak>365)break;
     }
     return streak;
   };
   const streak=calcStreak();
 
-  // Suplementos de hoy
   const todaySupps=suppLogs[today]||{};
   const suppsTakenToday=supplements.filter(s=>todaySupps[s.name]===true).length;
+  const monthLabel=new Date(year,month,1).toLocaleString('es',{month:'long',year:'numeric'});
+  const prevMonth=()=>setViewMonth(({year,month})=>month===0?{year:year-1,month:11}:{year,month:month-1});
+  const nextMonth=()=>setViewMonth(({year,month})=>month===11?{year:year+1,month:0}:{year,month:month+1});
 
-  // ── CELL COLOR ────────────────────────────────────────────────────────
-  const getCellStyle=(dateStr,dow,isPast,log)=>{
-    const isToday=dateStr===today;
-    const isObl=GYM_OBLIGATORY.includes(dow);
-    const isFuture=dateStr>today;
+  // ── CELDA ─────────────────────────────────────────────────────────────
+  const getCellState=(dateStr,dow,isPast,log)=>{
+    if(dateStr>today) return 'future';
+    if(log?.attended) return 'attended';
+    if(GYM_OBLIGATORY.includes(dow)&&isPast) return 'missed';
+    return 'free';
+  };
 
-    if(isFuture) return{bg:'transparent',border:'1px solid transparent',emoji:'',opacity:0.4};
-    if(log?.attended) return{bg:'#E5FAE6',border:'1px solid #86efac',emoji:'💪',opacity:1};
-    if(!log&&isObl&&isPast) return{bg:'#FFEBEB',border:'1px solid #fca5a5',emoji:'❌',opacity:1};
-    if(!log&&!isObl&&isPast) return{bg:'var(--surface2)',border:'1px solid var(--border)',emoji:'—',opacity:0.6};
-    return{bg:'transparent',border:'1px solid transparent',emoji:'',opacity:1};
+  const cellStyles={
+    attended:{bg:'var(--primary)',color:'#fff',border:'var(--primary)'},
+    missed:{bg:'var(--danger-bg)',color:'var(--danger)',border:'#fca5a5'},
+    free:{bg:'transparent',color:'var(--text3)',border:'transparent'},
+    future:{bg:'transparent',color:'var(--text3)',border:'transparent'},
   };
 
   return(
@@ -3003,40 +2985,37 @@ function Gym(){
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
         <div>
           <h1 style={{fontSize:20,fontWeight:700,letterSpacing:'-0.3px'}}>Gym & Suplementos</h1>
-          <p style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Seguimiento de asistencia y suplementación diaria</p>
+          <p style={{fontSize:13,color:'var(--text3)',marginTop:3}}>Seguimiento de asistencia y suplementación</p>
         </div>
-        {/* Botón registrar hoy */}
-        <div style={{display:'flex',gap:8}}>
-          <Btn
-            variant={gymLogs[today]?.attended?'success':gymLogs[today]?.attended===false?'danger':'outline'}
-            onClick={()=>toggleGym(today)}
-          >
-            {gymLogs[today]?.attended?'✅ Fui hoy':gymLogs[today]?.attended===false?'❌ No fui hoy':'Registrar hoy'}
-          </Btn>
-        </div>
+        <Btn
+          variant={gymLogs[today]?.attended?'success':gymLogs[today]?.attended===false?'danger':'outline'}
+          onClick={()=>toggleGym(today)}
+        >
+          {gymLogs[today]?.attended?'Asistí hoy':gymLogs[today]?.attended===false?'No asistí hoy':'Registrar hoy'}
+        </Btn>
       </div>
 
-      {/* Stats row */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:12}}>
+      {/* Stats row — sin emojis, estilo empresarial */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
         {[
-          {label:'Asistencias',value:attended.length,icon:'💪',color:'var(--success)',bg:'var(--success-bg)'},
-          {label:'Faltas',value:missed.length,icon:'❌',color:'var(--danger)',bg:'var(--danger-bg)'},
-          {label:'Extras',value:extras.length,icon:'⭐',color:'var(--warning)',bg:'var(--warning-bg)'},
-          {label:'% del mes',value:`${attendanceRate}%`,icon:'📊',color:'var(--primary)',bg:'var(--primary-light)'},
-          {label:'Racha actual',value:streak,icon:'🔥',color:'#f97316',bg:'#fff7ed'},
+          {label:'Asistencias',sublabel:`del mes (${daysInMonth} días)`,value:`${attended}`,sub:`/ ${daysInMonth}`},
+          {label:'Faltas obligatorias',sublabel:'días Lun–Vie sin ir',value:`${missed}`,sub:'días'},
+          {label:'Días extra',sublabel:'Sáb o Dom que fuiste',value:`${extras}`,sub:'días'},
+          {label:'Racha actual',sublabel:'días consecutivos',value:`${streak}`,sub:'días'},
         ].map(s=>(
-          <div key={s.label} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'14px 16px',display:'flex',flexDirection:'column',gap:6}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <span style={{fontSize:11,color:'var(--text3)'}}>{s.label}</span>
-              <span style={{fontSize:18}}>{s.icon}</span>
+          <Card key={s.label} style={{padding:'16px 18px'}}>
+            <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{s.label}</div>
+            <div style={{display:'flex',alignItems:'baseline',gap:4}}>
+              <span style={{fontSize:26,fontWeight:700,color:'var(--text)',letterSpacing:'-0.5px'}}>{s.value}</span>
+              <span style={{fontSize:13,color:'var(--text3)',fontWeight:400}}>{s.sub}</span>
             </div>
-            <div style={{fontSize:22,fontWeight:700,color:s.color}}>{s.value}</div>
-          </div>
+            <div style={{fontSize:11,color:'var(--text3)',marginTop:4}}>{s.sublabel}</div>
+          </Card>
         ))}
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:16}}>
-        {/* Calendario gym */}
+        {/* Calendario */}
         <Card style={{padding:0,overflow:'hidden'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px',borderBottom:'1px solid var(--border)'}}>
             <button onClick={prevMonth} style={{width:30,height:30,borderRadius:8,background:'var(--surface2)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'var(--text2)',fontSize:16}}>‹</button>
@@ -3045,16 +3024,15 @@ function Gym(){
           </div>
 
           <div style={{padding:'12px'}}>
-            {/* Headers */}
             <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:3,marginBottom:6}}>
               {DAYS.map((d,i)=>(
                 <div key={d} style={{textAlign:'center',fontSize:11,fontWeight:600,
-                  color:GYM_OBLIGATORY.includes(i)?'var(--primary)':'var(--text3)',padding:'4px 0'}}>
+                  color:GYM_OBLIGATORY.includes(i)?'var(--primary)':'var(--text3)',
+                  padding:'4px 0',letterSpacing:'0.2px'}}>
                   {d}
                 </div>
               ))}
             </div>
-            {/* Celdas */}
             <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:3}}>
               {Array.from({length:firstDay},(_,i)=><div key={`e-${i}`}/>)}
               {Array.from({length:daysInMonth},(_,i)=>{
@@ -3064,30 +3042,36 @@ function Gym(){
                 const isPast=dateStr<=today;
                 const isToday=dateStr===today;
                 const log=gymLogs[dateStr];
-                const {bg,border,emoji,opacity}=getCellStyle(dateStr,dow,isPast,log);
+                const state=getCellState(dateStr,dow,isPast,log);
+                const cs=cellStyles[state];
                 const isObl=GYM_OBLIGATORY.includes(dow);
 
                 return(
-                  <div
-                    key={day}
-                    onClick={()=>isPast&&toggleGym(dateStr)}
-                    style={{
-                      minHeight:64,padding:'5px 4px',borderRadius:10,
-                      background:bg,border,opacity,
-                      cursor:isPast?'pointer':'default',
-                      transition:'all .15s',
-                      outline:isToday?'2px solid var(--primary)':'none',
-                      outlineOffset:1,
-                    }}
-                  >
-                    <div style={{fontSize:12,fontWeight:isToday?700:400,
-                      color:isToday?'var(--primary)':'var(--text)',
-                      textAlign:'center',marginBottom:3}}>
-                      {day}
-                    </div>
-                    <div style={{textAlign:'center',fontSize:16}}>{emoji}</div>
-                    {isObl&&!isPast&&(
-                      <div style={{textAlign:'center',fontSize:9,color:'var(--text3)',marginTop:2}}>Oblig.</div>
+                  <div key={day} onClick={()=>isPast&&toggleGym(dateStr)} style={{
+                    minHeight:52,padding:'5px 4px',borderRadius:8,
+                    background:cs.bg,
+                    border:`1.5px solid ${isToday?'var(--primary)':cs.border}`,
+                    opacity:state==='future'?0.3:1,
+                    cursor:isPast?'pointer':'default',
+                    transition:'all .15s',
+                    outline:isToday&&state!=='attended'?'2px solid var(--primary)':'none',
+                    outlineOffset:1,
+                    display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-start',gap:2,
+                  }}>
+                    <div style={{
+                      fontSize:12,fontWeight:isToday?700:400,
+                      color:state==='attended'?'#fff':isToday?'var(--primary)':cs.color,
+                      textAlign:'center',lineHeight:1.4,
+                    }}>{day}</div>
+                    {/* Indicador visual sin emoji */}
+                    {state==='attended'&&(
+                      <div style={{width:6,height:6,borderRadius:'50%',background:'rgba(255,255,255,0.7)'}}/>
+                    )}
+                    {state==='missed'&&(
+                      <div style={{width:6,height:2,borderRadius:1,background:'var(--danger)',opacity:0.7}}/>
+                    )}
+                    {isObl&&state==='future'&&(
+                      <div style={{width:4,height:4,borderRadius:'50%',background:'var(--primary)',opacity:0.4}}/>
                     )}
                   </div>
                 );
@@ -3095,72 +3079,76 @@ function Gym(){
             </div>
           </div>
 
-          {/* Leyenda */}
-          <div style={{display:'flex',gap:16,padding:'12px 20px',borderTop:'1px solid var(--border)',flexWrap:'wrap'}}>
+          {/* Leyenda limpia */}
+          <div style={{display:'flex',gap:20,padding:'12px 20px',borderTop:'1px solid var(--border)',alignItems:'center'}}>
+            <span style={{fontSize:11,color:'var(--text3)',fontWeight:500}}>Referencias:</span>
             {[
-              {emoji:'💪',label:'Asistí',bg:'#E5FAE6'},
-              {emoji:'❌',label:'Falté (oblig.)',bg:'#FFEBEB'},
-              {emoji:'—',label:'Día libre',bg:'var(--surface2)'},
+              {color:'var(--primary)',label:'Asistí'},
+              {color:'var(--danger-bg)',border:'#fca5a5',label:'Falté (obligatorio)'},
             ].map(l=>(
-              <div key={l.label} style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:'var(--text3)'}}>
-                <div style={{width:16,height:16,borderRadius:4,background:l.bg,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10}}>{l.emoji}</div>
+              <div key={l.label} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'var(--text2)'}}>
+                <div style={{width:12,height:12,borderRadius:3,background:l.color,border:`1px solid ${l.border||l.color}`}}/>
                 {l.label}
               </div>
             ))}
-            <div style={{marginLeft:'auto',fontSize:11,color:'var(--text3)'}}>
-              <span style={{color:'var(--primary)',fontWeight:600}}>Azul</span> = días obligatorios
-            </div>
+            <div style={{marginLeft:'auto',fontSize:11,color:'var(--text3)'}}>Lun–Vie en azul = obligatorio</div>
           </div>
         </Card>
 
-        {/* Panel derecho: suplementos + historial */}
+        {/* Panel derecho */}
         <div style={{display:'flex',flexDirection:'column',gap:12}}>
 
-          {/* Suplementos de hoy */}
+          {/* Suplementos hoy */}
           <Card style={{padding:0,overflow:'hidden'}}>
             <div style={{padding:'14px 16px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <div>
-                <div style={{fontWeight:600,fontSize:13,color:'var(--text)'}}>Suplementos hoy</div>
-                <div style={{fontSize:11,color:'var(--text3)',marginTop:1}}>{suppsTakenToday}/{supplements.length} tomados</div>
+                <div style={{fontWeight:600,fontSize:13,color:'var(--text)'}}>Suplementos — hoy</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:1}}>{suppsTakenToday} de {supplements.length} tomados</div>
               </div>
-              <div style={{fontSize:20}}>{suppsTakenToday===supplements.length&&supplements.length>0?'✅':'💊'}</div>
+              {/* Barra de progreso mini */}
+              <div style={{width:60,height:5,background:'var(--border)',borderRadius:99,overflow:'hidden'}}>
+                <div style={{height:'100%',width:supplements.length>0?`${(suppsTakenToday/supplements.length)*100}%`:'0%',background:'var(--primary)',borderRadius:99,transition:'width .3s'}}/>
+              </div>
             </div>
-            <div style={{padding:'10px 14px',display:'flex',flexDirection:'column',gap:8}}>
-              {loading?<Loading/>:supplements.length===0?
-                <div style={{fontSize:12,color:'var(--text3)',textAlign:'center',padding:'16px 0'}}>Sin suplementos</div>:
-                supplements.map(s=>{
+            <div style={{padding:'10px 14px',display:'flex',flexDirection:'column',gap:6}}>
+              {loading?<Loading/>:supplements.length===0
+                ?<div style={{fontSize:12,color:'var(--text3)',textAlign:'center',padding:'16px 0'}}>Sin suplementos configurados</div>
+                :supplements.map(s=>{
                   const taken=suppLogs[today]?.[s.name]===true;
                   return(
                     <div key={s.name} onClick={()=>toggleSupp(today,s.name)} style={{
-                      display:'flex',alignItems:'center',gap:10,padding:'10px 12px',
-                      borderRadius:10,cursor:'pointer',
-                      background:taken?'var(--success-bg)':'var(--surface2)',
-                      border:`1.5px solid ${taken?'#86efac':'var(--border)'}`,
-                      transition:'all .2s',
+                      display:'flex',alignItems:'center',gap:10,padding:'9px 12px',
+                      borderRadius:9,cursor:'pointer',
+                      background:taken?'var(--primary-light)':'var(--surface2)',
+                      border:`1px solid ${taken?'var(--primary)':'var(--border)'}`,
+                      transition:'all .15s',
                     }}>
+                      {/* Checkbox cuadrado */}
                       <div style={{
-                        width:22,height:22,borderRadius:6,flexShrink:0,
-                        border:`2px solid ${taken?'var(--success)':'var(--border2)'}`,
-                        background:taken?'var(--success)':'transparent',
+                        width:18,height:18,borderRadius:5,flexShrink:0,
+                        border:`2px solid ${taken?'var(--primary)':'var(--border2)'}`,
+                        background:taken?'var(--primary)':'transparent',
                         display:'flex',alignItems:'center',justifyContent:'center',
+                        transition:'all .15s',
                       }}>
-                        {taken&&<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>}
+                        {taken&&<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l3 3 4-4" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                       </div>
-                      <span style={{fontSize:13,fontWeight:500,color:taken?'var(--success)':'var(--text)',flex:1,textDecoration:taken?'none':'none'}}>
+                      <span style={{fontSize:13,fontWeight:taken?500:400,color:taken?'var(--primary)':'var(--text)',flex:1}}>
                         {s.name}
                       </span>
-                      {taken&&<span style={{fontSize:11,color:'var(--success)'}}>✓</span>}
+                      {taken&&<span style={{fontSize:11,color:'var(--primary)',fontWeight:600}}>Tomado</span>}
                     </div>
                   );
-                })
-              }
+                })}
             </div>
           </Card>
 
-          {/* Historial suplementos últimos 7 días */}
-          <Card>
-            <CardHeader title="Últimos 7 días"/>
-            <div style={{display:'flex',flexDirection:'column',gap:4}}>
+          {/* Últimos 7 días */}
+          <Card style={{padding:0,overflow:'hidden'}}>
+            <div style={{padding:'14px 16px',borderBottom:'1px solid var(--border)'}}>
+              <div style={{fontWeight:600,fontSize:13,color:'var(--text)'}}>Últimos 7 días</div>
+            </div>
+            <div style={{padding:'8px 14px',display:'flex',flexDirection:'column',gap:0}}>
               {Array.from({length:7},(_,i)=>{
                 const d=new Date(today+'T12:00');
                 d.setDate(d.getDate()-i);
@@ -3170,61 +3158,59 @@ function Gym(){
                 const gymLog=gymLogs[ds];
                 const daySupps=suppLogs[ds]||{};
                 const suppCount=supplements.filter(s=>daySupps[s.name]===true).length;
+                const gymState=gymLog?.attended?'attended':isObl?'missed':'free';
 
                 return(
-                  <div key={ds} style={{display:'flex',alignItems:'center',gap:8,padding:'7px 0',borderBottom:'1px solid var(--border)'}}>
-                    {/* Día */}
-                    <div style={{width:36,flexShrink:0}}>
-                      <div style={{fontSize:11,fontWeight:600,color:ds===today?'var(--primary)':'var(--text)'}}>{d.toLocaleString('es',{weekday:'short'})}</div>
+                  <div key={ds} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:i<6?'1px solid var(--border)':'none'}}>
+                    <div style={{width:38,flexShrink:0}}>
+                      <div style={{fontSize:12,fontWeight:ds===today?600:400,color:ds===today?'var(--primary)':'var(--text)',textTransform:'capitalize'}}>
+                        {d.toLocaleString('es',{weekday:'short'})}
+                      </div>
                       <div style={{fontSize:10,color:'var(--text3)'}}>{d.getDate()}/{d.getMonth()+1}</div>
                     </div>
-                    {/* Gym */}
+                    {/* Gym status — sin emoji, con color */}
                     <div style={{
-                      width:28,height:28,borderRadius:7,flexShrink:0,
-                      background:gymLog?.attended?'var(--success-bg)':isObl&&!gymLog?.attended?'var(--danger-bg)':'var(--surface2)',
-                      display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,
+                      width:72,height:22,borderRadius:6,flexShrink:0,
+                      background:gymState==='attended'?'var(--primary)':gymState==='missed'?'var(--danger-bg)':'var(--surface2)',
+                      border:`1px solid ${gymState==='attended'?'var(--primary)':gymState==='missed'?'#fca5a5':'var(--border)'}`,
+                      display:'flex',alignItems:'center',justifyContent:'center',
                     }}>
-                      {gymLog?.attended?'💪':isObl?'❌':'—'}
+                      <span style={{fontSize:10,fontWeight:600,color:gymState==='attended'?'#fff':gymState==='missed'?'var(--danger)':'var(--text3)'}}>
+                        {gymState==='attended'?'Asistí':gymState==='missed'?'No fui':'Libre'}
+                      </span>
                     </div>
                     {/* Suplementos */}
-                    <div style={{flex:1,display:'flex',gap:4,flexWrap:'wrap'}}>
+                    <div style={{flex:1,display:'flex',gap:3,flexWrap:'wrap'}}>
                       {supplements.map(s=>(
                         <div key={s.name} style={{
-                          fontSize:9,fontWeight:600,padding:'2px 6px',borderRadius:99,
-                          background:daySupps[s.name]?'var(--success-bg)':'var(--surface2)',
-                          color:daySupps[s.name]?'var(--success)':'var(--text3)',
-                          border:`1px solid ${daySupps[s.name]?'#86efac':'var(--border)'}`,
+                          fontSize:9,fontWeight:500,padding:'2px 6px',borderRadius:4,
+                          background:daySupps[s.name]?'var(--primary-light)':'var(--surface2)',
+                          color:daySupps[s.name]?'var(--primary)':'var(--text3)',
+                          border:`1px solid ${daySupps[s.name]?'var(--primary)':'var(--border)'}`,
                         }}>
-                          {s.name.slice(0,3)}
+                          {s.name.slice(0,4)}
                         </div>
                       ))}
                     </div>
-                    {/* Resumen */}
-                    <div style={{fontSize:10,color:'var(--text3)',flexShrink:0}}>{suppCount}/{supplements.length}</div>
+                    <div style={{fontSize:10,color:'var(--text3)',flexShrink:0,minWidth:28,textAlign:'right'}}>{suppCount}/{supplements.length}</div>
                   </div>
                 );
               })}
             </div>
           </Card>
 
-          {/* Gestión de suplementos */}
+          {/* Gestión suplementos */}
           <Card>
-            <CardHeader title="Mis suplementos"/>
-            <div style={{display:'flex',gap:8,marginBottom:12}}>
-              <Input
-                placeholder="Nuevo suplemento..."
-                value={newSupp}
-                onChange={e=>setNewSupp(e.target.value)}
-                onKeyDown={e=>e.key==='Enter'&&addSupplement()}
-                style={{flex:1}}
-              />
+            <CardHeader title="Suplementos"/>
+            <div style={{display:'flex',gap:8,marginBottom:10}}>
+              <Input placeholder="Agregar suplemento..." value={newSupp} onChange={e=>setNewSupp(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addSupplement()} style={{flex:1}}/>
               <Btn onClick={addSupplement} disabled={addingSupp||!newSupp.trim()} icon={Icons.plus} style={{padding:'8px 12px'}}/>
             </div>
             <div style={{display:'flex',flexDirection:'column',gap:4}}>
               {supplements.map(s=>(
-                <div key={s.name} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',background:'var(--surface2)',borderRadius:8}}>
+                <div key={s.name} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 10px',background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)'}}>
                   <span style={{fontSize:13,color:'var(--text)'}}>{s.name}</span>
-                  <button onClick={()=>deleteSupplement(s.name)} style={{color:'var(--danger)',background:'none',border:'none',cursor:'pointer',display:'flex',opacity:0.7}}>{Icons.trash}</button>
+                  <button onClick={()=>deleteSupplement(s.name)} style={{color:'var(--text3)',background:'none',border:'none',cursor:'pointer',display:'flex',opacity:0.6}}>{Icons.trash}</button>
                 </div>
               ))}
             </div>
