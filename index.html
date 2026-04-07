@@ -2995,11 +2995,11 @@ function Gym(){
         </Btn>
       </div>
 
-      {/* Stats row — sin emojis, estilo empresarial */}
+      {/* Stats row */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
         {[
           {label:'Asistencias',sublabel:`del mes (${daysInMonth} días)`,value:`${attended}`,sub:`/ ${daysInMonth}`},
-          {label:'Faltas obligatorias',sublabel:'días Lun–Vie sin ir',value:`${missed}`,sub:'días'},
+          {label:'Registro de faltas',sublabel:'días Lun–Vie sin asistir',value:`${missed}`,sub:'días'},
           {label:'Días extra',sublabel:'Sáb o Dom que fuiste',value:`${extras}`,sub:'días'},
           {label:'Racha actual',sublabel:'días consecutivos',value:`${streak}`,sub:'días'},
         ].map(s=>(
@@ -3013,6 +3013,30 @@ function Gym(){
           </Card>
         ))}
       </div>
+
+      {/* Suplementos — días totales tomados este mes */}
+      {supplements.length>0&&(()=>{
+        const suppStats=supplements.map(s=>{
+          const days=Object.keys(suppLogs).filter(date=>
+            date.startsWith(monthKey)&&suppLogs[date]?.[s.name]===true
+          ).length;
+          return{name:s.name,days};
+        });
+        return(
+          <div style={{display:'grid',gridTemplateColumns:`repeat(${supplements.length},1fr)`,gap:12}}>
+            {suppStats.map(s=>(
+              <Card key={s.name} style={{padding:'16px 18px'}}>
+                <div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{s.name}</div>
+                <div style={{display:'flex',alignItems:'baseline',gap:4}}>
+                  <span style={{fontSize:26,fontWeight:700,color:'var(--primary)',letterSpacing:'-0.5px'}}>{s.days}</span>
+                  <span style={{fontSize:13,color:'var(--text3)',fontWeight:400}}>/ {daysInMonth} días</span>
+                </div>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:4}}>días tomado este mes</div>
+              </Card>
+            ))}
+          </div>
+        );
+      })()}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:16}}>
         {/* Calendario */}
